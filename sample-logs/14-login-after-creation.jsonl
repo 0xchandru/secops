@@ -1,0 +1,2 @@
+{"EventID":4720,"Computer":"DC01.corp.local","Channel":"Security","EventData":{"TargetUserName":"temp_backdoor","TargetDomainName":"CORP","SubjectUserName":"compromised_admin","SubjectDomainName":"CORP","SamAccountName":"temp_backdoor","DisplayName":"Temp Backdoor","UserPrincipalName":"temp_backdoor@corp.local"}}
+{"EventID":4624,"Computer":"DC01.corp.local","Channel":"Security","EventData":{"TargetUserName":"temp_backdoor","TargetDomainName":"CORP","IpAddress":"10.0.1.200","IpPort":"50100","LogonType":"3","LogonProcessName":"NtLmSsp","AuthenticationPackageName":"NTLM"}}

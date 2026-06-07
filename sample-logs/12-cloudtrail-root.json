@@ -1,0 +1,33 @@
+{
+  "eventVersion": "1.08",
+  "userIdentity": {
+    "type": "Root",
+    "principalId": "123456789012",
+    "arn": "arn:aws:iam::123456789012:root",
+    "accountId": "123456789012",
+    "accessKeyId": "AKIAIOSFODNN7EXAMPLE"
+  },
+  "eventTime": "2025-01-15T07:00:00Z",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "CreateUser",
+  "awsRegion": "us-east-1",
+  "sourceIPAddress": "203.0.113.55",
+  "userAgent": "aws-cli/2.15.0 Python/3.11.6",
+  "requestParameters": {
+    "userName": "backdoor-user"
+  },
+  "responseElements": {
+    "user": {
+      "userName": "backdoor-user",
+      "userId": "AIDACKCEVSQ6C2EXAMPLE",
+      "arn": "arn:aws:iam::123456789012:user/backdoor-user",
+      "createDate": "2025-01-15T07:00:00Z"
+    }
+  },
+  "requestID": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "eventID": "f1e2d3c4-b5a6-7890-abcd-1234567890ef",
+  "readOnly": false,
+  "eventType": "AwsApiCall",
+  "managementEvent": true,
+  "recipientAccountId": "123456789012"
+}

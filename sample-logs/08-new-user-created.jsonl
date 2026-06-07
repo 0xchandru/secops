@@ -1,0 +1,2 @@
+{"EventID":4720,"Computer":"DC01.corp.local","Channel":"Security","EventData":{"TargetUserName":"backdoor_admin","TargetDomainName":"CORP","SubjectUserName":"attacker","SubjectDomainName":"CORP","SamAccountName":"backdoor_admin","DisplayName":"Backdoor Admin","UserPrincipalName":"backdoor_admin@corp.local"}}
+{"EventID":4720,"Computer":"DC01.corp.local","Channel":"Security","EventData":{"TargetUserName":"svc_exfil","TargetDomainName":"CORP","SubjectUserName":"compromised_admin","SubjectDomainName":"CORP","SamAccountName":"svc_exfil","DisplayName":"Service Exfil"}}

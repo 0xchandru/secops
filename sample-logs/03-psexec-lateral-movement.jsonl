@@ -1,0 +1,5 @@
+{"EventID":7045,"Computer":"SRV02.corp.local","Channel":"System","EventData":{"ServiceName":"PSEXESVC","ImagePath":"%SystemRoot%\\PSEXESVC.exe","ServiceType":"user mode service","StartType":"demand start","AccountName":"LocalSystem"}}
+{"EventID":4697,"Computer":"SRV03.corp.local","Channel":"Security","EventData":{"ServiceName":"PSEXESVC","ServiceFileName":"C:\\Windows\\PSEXESVC.exe","SubjectUserName":"attacker","SubjectDomainName":"CORP"}}
+{"EventID":7045,"Computer":"SRV04.corp.local","Channel":"System","EventData":{"ServiceName":"RemComSvc","ImagePath":"C:\\Windows\\RemComSvc.exe","ServiceType":"user mode service","StartType":"demand start","AccountName":"LocalSystem"}}
+{"EventID":7045,"Computer":"SRV05.corp.local","Channel":"System","EventData":{"ServiceName":"PAExec-1234-hostname","ImagePath":"C:\\Windows\\PAExec-1234-hostname.exe","ServiceType":"user mode service","StartType":"demand start","AccountName":"LocalSystem"}}
+

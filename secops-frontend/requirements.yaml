@@ -1,0 +1,13 @@
+packages:
+  "recharts": "Used for all charts on dashboard and visual analytics"
+  "zustand": "Client-side state management for mock data (frontend-only app)"
+  "date-fns": "Date formatting and manipulation for log timestamps"
+  "uuid": "ID generation for mock data"
+  "@types/uuid": "Types for UUID generation"
+
+images: []
+
+notes:
+  - "This is a completely frontend-only application using local state."
+  - "Routing uses wouter, as specified by the standard workspace."
+  - "The app defaults to dark mode as it is a cybersecurity SIEM interface."

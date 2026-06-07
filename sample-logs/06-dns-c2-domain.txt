@@ -1,0 +1,5 @@
+<30>Jan 15 05:10:22 dns01 named[1234]: client @0x7f8b4c query: evil-c2-server.xyz IN A +
+<30>Jan 15 05:10:25 dns01 named[1234]: client @0x7f8b4c query: cobalt-beacon.malware.xyz IN A +
+<30>Jan 15 05:10:30 dns01 unbound[5678]: query: cobaltstrikeC2.darknet.org IN AAAA +
+{"EventID":22,"Computer":"WS05.corp.local","Channel":"Microsoft-Windows-Sysmon/Operational","ProviderName":"Microsoft-Windows-Sysmon","EventData":{"QueryName":"evil-c2-server.xyz","QueryResults":"::ffff:185.220.101.35","Image":"C:\\Windows\\System32\\svchost.exe","ProcessId":"1234","User":"CORP\\jdoe"}}
+{"EventID":22,"Computer":"WS05.corp.local","Channel":"Microsoft-Windows-Sysmon/Operational","ProviderName":"Microsoft-Windows-Sysmon","EventData":{"QueryName":"cobalt-beacon.malware.xyz","QueryResults":"::ffff:45.77.65.211","Image":"C:\\malware\\backdoor.exe","ProcessId":"6789","User":"CORP\\compromised"}}

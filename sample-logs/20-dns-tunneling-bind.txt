@@ -1,0 +1,17 @@
+# source: dns
+# rule: DNS Tunneling Detection (high-entropy subdomain queries to single domain)
+# description: BIND/named query logs showing DNS tunneling via encoded subdomains
+# format: BIND named query log
+# severity: critical | MITRE: T1071.004 (Application Layer Protocol: DNS)
+15-Jan-2025 11:15:01.234 client @0x7f8a3c001234 10.0.3.15#49152 (aGVsbG8gd29ybGQ.data.evil-tunnel.xyz): query: aGVsbG8gd29ybGQ.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:01.567 client @0x7f8a3c001234 10.0.3.15#49153 (dGhpcyBpcyBhIHRlc3Q.data.evil-tunnel.xyz): query: dGhpcyBpcyBhIHRlc3Q.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:02.012 client @0x7f8a3c001234 10.0.3.15#49154 (c2Vuc2l0aXZlIGRhdGE.data.evil-tunnel.xyz): query: c2Vuc2l0aXZlIGRhdGE.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:02.345 client @0x7f8a3c001234 10.0.3.15#49155 (ZXhmaWx0cmF0ZWQgZGF0YQ.data.evil-tunnel.xyz): query: ZXhmaWx0cmF0ZWQgZGF0YQ.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:02.789 client @0x7f8a3c001234 10.0.3.15#49156 (cGFzc3dvcmRzIGFuZCBrZXlz.data.evil-tunnel.xyz): query: cGFzc3dvcmRzIGFuZCBrZXlz.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:03.012 client @0x7f8a3c001234 10.0.3.15#49157 (Y3JlZGVudGlhbHMgbGVha2Vk.data.evil-tunnel.xyz): query: Y3JlZGVudGlhbHMgbGVha2Vk.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:03.456 client @0x7f8a3c001234 10.0.3.15#49158 (ZG9jdW1lbnRzIGFuZCBmaWxlcw.data.evil-tunnel.xyz): query: ZG9jdW1lbnRzIGFuZCBmaWxlcw.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:04.001 client @0x7f8a3c001234 10.0.3.15#49159 (c3lzdGVtIGluZm9ybWF0aW9u.data.evil-tunnel.xyz): query: c3lzdGVtIGluZm9ybWF0aW9u.data.evil-tunnel.xyz IN TXT +E(0)
+15-Jan-2025 11:15:04.567 client @0x7f8a3c001234 10.0.3.15#49160 (bmV0d29yayBtYXBwaW5n.data.evil-tunnel.xyz): query: bmV0d29yayBtYXBwaW5n.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:05.123 client @0x7f8a3c001234 10.0.3.15#49161 (YWNjZXNzIHRva2Vucw.data.evil-tunnel.xyz): query: YWNjZXNzIHRva2Vucw.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:05.890 client @0x7f8a3c001234 10.0.3.15#49162 (ZGF0YWJhc2UgZHVtcA.data.evil-tunnel.xyz): query: ZGF0YWJhc2UgZHVtcA.data.evil-tunnel.xyz IN A +E(0)
+15-Jan-2025 11:15:06.234 client @0x7f8a3c001234 10.0.3.15#49163 (c3NoIGtleXMgYW5kIGNlcnRz.data.evil-tunnel.xyz): query: c3NoIGtleXMgYW5kIGNlcnRz.data.evil-tunnel.xyz IN A +E(0)
