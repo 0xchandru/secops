@@ -14,7 +14,7 @@ trap cleanup EXIT INT TERM
 # Start backend
 echo "Starting backend on :8080..."
 cd /home/runner/workspace/secops-backend
-node --enable-source-maps ./dist/index.mjs &
+node --env-file=.env --enable-source-maps ./dist/index.mjs &
 BACKEND_PID=$!
 
 # Wait for backend to be ready

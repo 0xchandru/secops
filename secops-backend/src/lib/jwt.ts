@@ -1,8 +1,14 @@
 import jwt from "jsonwebtoken";
 import type { UserRole } from "../db";
 
-const ACCESS_SECRET = process.env["JWT_SECRET"]!;
-const REFRESH_SECRET = process.env["JWT_REFRESH_SECRET"]!;
+function requireSecret(name: string): string {
+  const val = process.env[name];
+  if (!val) throw new Error(`Environment variable ${name} is not set. Add it to .env (see .env.example).`);
+  return val;
+}
+
+const ACCESS_SECRET = requireSecret("JWT_SECRET");
+const REFRESH_SECRET = requireSecret("JWT_REFRESH_SECRET");
 const ACCESS_EXPIRES = "15m";
 const REFRESH_EXPIRES = "7d";
 
