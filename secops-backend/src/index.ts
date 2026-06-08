@@ -11,6 +11,7 @@ import { logger } from "./lib/logger";
 import { initWebSocket } from "./lib/websocket";
 import { ensureEngineLoaded } from "./lib/detection/pipeline";
 import { seedDefaultRules } from "./lib/detection/seed-rules";
+import { seedDefaultUsers } from "./lib/seed-users";
 import { loadAssetCache } from "./lib/enrichment";
 import { getRedis } from "./lib/redis";
 import { startScheduler } from "./lib/scheduler";
@@ -49,6 +50,12 @@ server.listen(port, async () => {
     logger.info("Asset cache loaded");
   } catch (err) {
     logger.warn({ err }, "Failed to load asset cache");
+  }
+
+  try {
+    await seedDefaultUsers();
+  } catch (err) {
+    logger.warn({ err }, "Failed to seed default users");
   }
 
   try {

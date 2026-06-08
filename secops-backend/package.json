@@ -12,7 +12,10 @@
     "db:push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
     "seed:admin": "tsx ./scripts/seed-admin.ts",
     "seed:roles": "tsx ./scripts/seed-new-roles.ts",
-    "seed:rules": "tsx ./scripts/seed-detection-rules.ts"
+    "seed:rules": "tsx ./scripts/seed-detection-rules.ts",
+    "seed:users": "tsx ./scripts/seed-users.ts",
+    "db:setup": "tsx ./scripts/db-setup.ts",
+    "setup": "npm run db:setup && npm run seed:users"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
