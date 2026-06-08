@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { alertsApi, usersApi, normalizeAlert } from '@/lib/api';
+import { alertsApi, usersApi, normalizeAlert, threatlensApi } from '@/lib/api';
+import type { ThreatLensResult } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { safeFormat, timeAgo } from '@/lib/date-utils';
 import { actionsFromBackend } from '@/lib/alert-actions';

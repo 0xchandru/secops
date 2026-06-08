@@ -376,6 +376,29 @@ export const notificationsApi = {
     apiClient.delete(`/notifications/${id}`),
 };
 
+// ─── ThreatLens Integration ──────────────────────────────────────────────────
+
+export interface ThreatLensResult {
+  source: string;
+  ioc: { value: string; type: string; id: number };
+  scan_id: number;
+  score: number;
+  risk_level: string;
+  confidence: string;
+  breakdown: Record<string, number>;
+  mitre: Array<{ technique_id: string; technique: string; tactic: string; confidence: string }>;
+  results: Record<string, any>;
+  errors: string[];
+  query_time_ms: number;
+}
+
+export const threatlensApi = {
+  lookup: (value: string) =>
+    apiClient.post<ThreatLensResult>("/threatlens/lookup", { value }),
+  enrich: (value: string) =>
+    apiClient.get<any>(`/threatlens/enrich/${encodeURIComponent(value)}`),
+};
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface AuthUser {
