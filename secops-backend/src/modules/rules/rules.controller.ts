@@ -85,23 +85,49 @@ export async function toggleRule(req: Request, res: Response): Promise<void> {
 }
 
 export async function testRule(req: Request, res: Response): Promise<void> {
-  const id = req.params.id as string;
-  const rule = await rulesService.getRuleById(id);
-  if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
+  // Route: POST /rules/test — accepts yamlContent from body for immediate testing,
+  // or an existing rule's id from body to test against recent events.
+  const { yamlContent: bodyYaml, id: bodyId } = req.body as { yamlContent?: string; id?: string };
+  const ruleId = (req.params.id as string | undefined) ?? bodyId;
+
+  let yamlContent: string | undefined = bodyYaml;
+
+  if (ruleId) {
+    const rule = await rulesService.getRuleById(ruleId);
+    if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
+    yamlContent = rule.yamlContent ?? undefined;
+  }
+
+  if (!yamlContent?.trim()) {
+    // No YAML to test — return validation result
+    res.json({ valid: true, matchedEvents: 0, totalEvents: 0, errors: [] });
+    return;
+  }
+
+  // Validate YAML parses cleanly
+  const errors: string[] = [];
+  try {
+    const { default: yaml } = await import("js-yaml");
+    yaml.load(yamlContent);
+  } catch (e: any) {
+    errors.push(`YAML parse error: ${e.message}`);
+    res.json({ valid: false, matchedEvents: 0, totalEvents: 0, errors });
+    return;
+  }
 
   // Get recent events
+  const { rawLogsTable } = await import("../../db");
   const recentLogs = await db.select()
-    .from((await import("../../db")).rawLogsTable)
-    .where(gte((await import("../../db")).rawLogsTable.createdAt, new Date(Date.now() - 3600_000)))
+    .from(rawLogsTable)
+    .where(gte(rawLogsTable.createdAt, new Date(Date.now() - 3_600_000)))
     .limit(200)
     .orderBy(sql`created_at desc`);
 
   if (recentLogs.length === 0) {
-    res.json({ matchCount: 0, sampleMatches: [], message: "No events in the last hour to test against" });
+    res.json({ valid: true, matchedEvents: 0, totalEvents: 0, errors: [], message: "No events in last hour" });
     return;
   }
 
-  // Build NormalizedEvent objects for the test
   const normalizedEvents = recentLogs.map(log => ({
     id: log.id,
     timestamp: log.createdAt,
@@ -132,21 +158,23 @@ export async function testRule(req: Request, res: Response): Promise<void> {
     fileName: log.fileName ?? undefined,
     filePath: log.filePath ?? undefined,
     fileHash: log.fileHash ?? undefined,
-    rawData: log.rawData ?? undefined,
   }));
 
-  const yamlContent = rule.yamlContent ?? "";
-  const triggered = yamlContent
-    ? detectionEngine.testRule(yamlContent, normalizedEvents as any)
-    : [];
-  const matches = triggered.slice(0, 5).map(t => ({
+  const triggered = detectionEngine.testRule(yamlContent, normalizedEvents as any);
+  const sampleMatches = triggered.slice(0, 5).map(t => ({
     logId: t.triggerEventId,
     message: t.description,
     source: t.sourceHost,
     severity: t.severity,
   }));
 
-  res.json({ matchCount: triggered.length, sampleMatches: matches });
+  res.json({
+    valid: true,
+    matchedEvents: triggered.length,
+    totalEvents: recentLogs.length,
+    errors,
+    sampleMatches,
+  });
 }
 
 export async function getRuleStats(req: Request, res: Response): Promise<void> {

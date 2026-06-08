@@ -227,21 +227,51 @@ router.post("/logs/spl", requireAuth, can("alerts:view"), async (req: Request, r
     .orderBy(desc(rawLogsTable.createdAt))
     .limit(maxRows);
 
+  // Stamp Splunk canonical fields on every row so SPL queries using
+  // _time, _raw, host, source, sourcetype, index, eventtype, etc. work correctly.
+  const stampedRows = rows.map(row => ({
+    ...row,
+    _time: row.parsedTimestamp ?? row.createdAt,
+    _raw: row.message ?? (row.rawData ? JSON.stringify(row.rawData) : ""),
+    _indextime: row.createdAt,
+    host: row.hostname ?? row.source ?? "",
+    source: row.source ?? "",
+    sourcetype: row.sourcetype ?? "generic",
+    index: row.indexName ?? "main",
+    eventtype: row.eventType ?? "",
+    linecount: row.linecount ?? 1,
+    src: row.sourceIp ?? "",
+    dst: row.destIp ?? "",
+    src_ip: row.sourceIp ?? "",
+    dst_ip: row.destIp ?? "",
+    src_port: row.srcPort ?? null,
+    dst_port: row.dstPort ?? null,
+    user: row.username ?? "",
+    process: row.processName ?? "",
+    pid: row.processId ?? null,
+  }));
+
   // Apply pipe transformations in memory
   let results: Record<string, unknown>[];
   if (parsed.pipe) {
-    results = executeSplPipes(rows as Record<string, unknown>[], parsed.pipe);
+    results = executeSplPipes(stampedRows as Record<string, unknown>[], parsed.pipe);
   } else {
-    results = rows as Record<string, unknown>[];
+    results = stampedRows as Record<string, unknown>[];
   }
 
+  // Normalize SPL results to match the standard { logs, total } response shape
+  // so the frontend's LogsExplorerPage can render them without special casing.
+  // Also expose raw SPL metadata for display purposes.
   const took = Date.now() - start;
   res.json({
-    results,
-    count: results.length,
+    logs: results,
+    total: results.length,
+    isSplResult: true,
     took,
     pipe: parsed.pipe ?? null,
     baseQuery: query.split("|")[0].trim(),
+    page: 1,
+    limit: results.length,
   });
 });
 
