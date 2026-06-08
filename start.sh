@@ -11,10 +11,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Build backend
+echo "Building backend..."
+cd /home/runner/workspace/secops-backend
+node build.mjs
+
 # Start backend
 echo "Starting backend on :8080..."
-cd /home/runner/workspace/secops-backend
-node --env-file=.env --enable-source-maps ./dist/index.mjs &
+node --enable-source-maps ./dist/index.mjs &
 BACKEND_PID=$!
 
 # Wait for backend to be ready

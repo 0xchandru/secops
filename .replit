@@ -15,6 +15,7 @@ JWT_SECRET = "secops-dev-jwt-secret-change-in-production"
 ENABLE_SYSLOG = "false"
 ENABLE_WORKER = "false"
 REDIS_URL = "redis://localhost:6379"
+JWT_REFRESH_SECRET = "secops-dev-jwt-refresh-secret-change-in-production"
 
 [workflows]
 runButton = "Project"
