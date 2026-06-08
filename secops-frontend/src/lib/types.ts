@@ -93,6 +93,10 @@ export interface Alert {
     metadata?: Record<string, any>;
   }[];
   aiSummary: string;
+  enrichmentStatus?: string | null;
+  enrichmentCompletedAt?: string | null;
+  maxIocScore?: number | null;
+  maxIocRiskLevel?: string | null;
 }
 
 export interface DetectionRule {

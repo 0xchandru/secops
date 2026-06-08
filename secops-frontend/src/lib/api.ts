@@ -81,6 +81,9 @@ export function normalizeAlert(raw: any): Alert {
       metadata: t.metadata ?? {},
     })),
     aiSummary: raw.description ?? "No AI analysis available for this alert.",
+    enrichmentStatus: raw.enrichmentStatus ?? null,
+    maxIocScore: raw.maxIocScore ?? null,
+    maxIocRiskLevel: raw.maxIocRiskLevel ?? null,
   };
 }
 
@@ -374,6 +377,21 @@ export const notificationsApi = {
     apiClient.post("/notifications/read-all"),
   delete: (id: string) =>
     apiClient.delete(`/notifications/${id}`),
+};
+
+// ─── Enrichment ──────────────────────────────────────────────────────────────
+
+export const enrichmentApi = {
+  getAlertEnrichments: (alertId: string) =>
+    apiClient.get<{ enrichments: any[]; count: number }>(`/enrichment/alert/${alertId}`),
+  triggerAlertEnrichment: (alertId: string) =>
+    apiClient.post<{ status: string; alertId: string }>(`/enrichment/alert/${alertId}`),
+  enrichIoc: (value: string) =>
+    apiClient.post<any>("/enrichment/ioc", { value }),
+  clearAlertCache: (alertId: string) =>
+    apiClient.delete(`/enrichment/alert/${alertId}/cache`),
+  health: () =>
+    apiClient.get<{ threatlens: "online" | "offline"; timestamp: string }>("/enrichment/health"),
 };
 
 // ─── ThreatLens Integration ──────────────────────────────────────────────────

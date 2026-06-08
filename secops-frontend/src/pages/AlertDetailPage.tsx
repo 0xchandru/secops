@@ -7,6 +7,8 @@ import { safeFormat, timeAgo } from '@/lib/date-utils';
 import { actionsFromBackend } from '@/lib/alert-actions';
 import type { AlertAction } from '@/lib/alert-actions';
 
+import { ThreatLensReportTab } from '@/components/threat/ThreatLensReportTab';
+import { ThreatBadge } from '@/components/threat/ThreatBadge';
 import { SeverityBadge, StatusBadge } from '@/components/ui/Badge';
 import { useRoute, Link } from 'wouter';
 import {
@@ -30,8 +32,9 @@ import { format, isValid } from 'date-fns';
 
 const TABS = [
   { id: 'overview',       label: 'Overview',          icon: Eye },
-  { id: 'evidence',       label: 'Evidence',          icon: FileSearch },
-  { id: 'investigation',  label: 'Investigation',     icon: Zap },
+  { id: 'evidence',       label: 'IOC Enrichment',    icon: FileSearch },
+  { id: 'threatlens',     label: 'ThreatLens',        icon: BarChart3 },
+  { id: 'investigation',  label: 'Analyst Notes',     icon: Zap },
   { id: 'timeline',       label: 'Timeline',          icon: Clock },
   { id: 'related',        label: 'Related Events',    icon: ListTree },
 ] as const;
@@ -489,6 +492,9 @@ export default function AlertDetailPage() {
                   )}
                   {tab.id === 'evidence' && iocs.length > 0 && (
                     <span className="text-[10px] bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full font-bold">{iocs.length}</span>
+                  )}
+                  {tab.id === 'threatlens' && alertRaw?.maxIocRiskLevel && ['malicious', 'critical'].includes(alertRaw.maxIocRiskLevel) && (
+                    <span className="w-2 h-2 rounded-full bg-red-500 inline-block shrink-0" />
                   )}
                   {tab.id === 'investigation' && checklistProgress > 0 && (
                     <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded-full font-bold">{checklistProgress}/{checklistTotal}</span>
@@ -1021,6 +1027,13 @@ export default function AlertDetailPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* ── ThreatLens Report Tab ──────────────────────────────────── */}
+            {activeTab === 'threatlens' && (
+              <div className="bg-card border border-border rounded-xl shadow-sm p-5">
+                <ThreatLensReportTab alertId={alertRaw?.id ?? ''} />
               </div>
             )}
           </div>

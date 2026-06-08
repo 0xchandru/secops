@@ -10,3 +10,4 @@ export * from "./notifications";
 export * from "./roles";
 export * from "./user-roles";
 export * from "./alert-state-transitions";
+export * from "./enrichment";

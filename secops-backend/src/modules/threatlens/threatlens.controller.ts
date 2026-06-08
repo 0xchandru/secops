@@ -16,7 +16,7 @@ export async function lookup(req: Request, res: Response): Promise<void> {
 }
 
 export async function enrich(req: Request, res: Response): Promise<void> {
-  const { value } = req.params;
+  const value = req.params["value"] as string;
   if (!value) {
     res.status(400).json({ error: "value is required" });
     return;

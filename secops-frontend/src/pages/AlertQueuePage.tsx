@@ -7,6 +7,7 @@ import { safeFormat, timeAgo } from '@/lib/date-utils';
 import { getAvailableActions } from '@/lib/alert-actions';
 
 import { SeverityBadge, StatusBadge } from '@/components/ui/Badge';
+import { ThreatBadge } from '@/components/threat/ThreatBadge';
 import {
   Search, ShieldAlert, CheckSquare, Clock, Target, UserCheck,
   XCircle, CheckCircle2, AlertTriangle, Square, Loader2, Download, Layers,
@@ -112,6 +113,11 @@ function AlertRow({ alert, assigneeName, selectedIds, toggleSelect, currentUserI
             <span className="text-[10px] text-muted-foreground">+{alert.mitreIds.length - 2}</span>
           )}
         </div>
+      </td>
+
+      {/* Threat Score */}
+      <td className="px-3 py-3.5">
+        <ThreatBadge score={(alert as any).maxIocScore} riskLevel={(alert as any).maxIocRiskLevel} />
       </td>
 
       {/* Age */}
@@ -734,6 +740,7 @@ export default function AlertQueuePage() {
                     <th className="px-3 py-3 font-medium">Severity</th>
                     <th className="px-3 py-3 font-medium">Status</th>
                     <th className="px-3 py-3 font-medium">MITRE</th>
+                    <th className="px-3 py-3 font-medium">Threat Score</th>
                     <th className="px-3 py-3 font-medium">Created</th>
                     <th className="px-3 py-3 font-medium">Assignee</th>
                     <th className="px-3 py-3 font-medium text-right">Actions</th>
@@ -744,7 +751,7 @@ export default function AlertQueuePage() {
                     groupedAlerts.map(([groupLabel, groupAlerts]) => (
                       <React.Fragment key={groupLabel}>
                         <tr className="bg-secondary/40">
-                          <td colSpan={8} className="px-4 py-2.5">
+                          <td colSpan={9} className="px-4 py-2.5">
                             <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
                               <Layers className="w-3.5 h-3.5 text-primary" />
                               {groupLabel}

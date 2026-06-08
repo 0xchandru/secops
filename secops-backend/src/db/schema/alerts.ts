@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, pgEnum, jsonb, integer, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, pgEnum, jsonb, integer, boolean, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -33,6 +33,10 @@ export const alertsTable = pgTable("alerts", {
   relatedEventIds: text("related_event_ids").array().default([]),
   rawLog: jsonb("raw_log"),
   dedupKey: text("dedup_key").unique(),
+  enrichmentStatus: text("enrichment_status").default("pending"),
+  enrichmentCompletedAt: timestamp("enrichment_completed_at"),
+  maxIocScore: real("max_ioc_score"),
+  maxIocRiskLevel: text("max_ioc_risk_level"),
   resolutionNotes: text("resolution_notes"),
   createdBy: uuid("created_by").references(() => usersTable.id),
   assignedTo: uuid("assigned_to").references(() => usersTable.id),

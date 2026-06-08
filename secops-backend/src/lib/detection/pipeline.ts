@@ -1,4 +1,5 @@
 import { db, rawLogsTable, alertsTable, rulesTable } from "../../db";
+import { enrichAlertIocs } from "../../modules/enrichment/enrichment.service.js";
 import { eq, sql } from "drizzle-orm";
 import { detectionEngine } from "./engine";
 import { parseLog } from "../parsers";
@@ -258,6 +259,8 @@ export async function processLogRecord(logId: string, raw: string, sourceType: s
             link: `/alerts/${created.id}`,
             metadata: { alertId: created.id, alertCode, severity: ta.severity },
           });
+          // Auto-enrich IOCs — fire and forget, never blocks alert creation
+          setImmediate(() => enrichAlertIocs(created.id).catch(() => {}));
         }
       }
     } catch {
