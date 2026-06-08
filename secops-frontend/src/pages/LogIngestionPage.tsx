@@ -106,6 +106,7 @@ export default function LogIngestionPage() {
   const [rawHostname, setRawHostname] = useState('');
   const [rawResult, setRawResult] = useState<{ inserted: number; source: string } | null>(null);
   const [rawError, setRawError] = useState<string | null>(null);
+  const [sourcetype, setSourcetype] = useState('');
 
   const { data: logsData, dataUpdatedAt } = useQuery({
     queryKey: ['logs', { limit: 20, page: 1 }],
@@ -130,6 +131,7 @@ export default function LogIngestionPage() {
       ingestApi.raw(text, {
         source: rawSource || undefined,
         hostname: rawHostname || undefined,
+        sourcetype: sourcetype || undefined,
       }),
     onSuccess: (res) => {
       setRawResult(res.data);
@@ -157,7 +159,8 @@ export default function LogIngestionPage() {
   }, [dataUpdatedAt]);
 
   const uploadMutation = useMutation({
-    mutationFn: (records: Record<string, unknown>[]) => ingestApi.bulk(records),
+    mutationFn: (data: { records: Record<string, unknown>[]; sourcetype?: string }) =>
+      ingestApi.bulk(data.records, data.sourcetype || undefined),
     onSuccess: (res) => {
       setUploadResult({ inserted: res.data.inserted });
       setStatus('success');
@@ -185,7 +188,7 @@ export default function LogIngestionPage() {
         return;
       }
       setStatus('uploading');
-      uploadMutation.mutate(result.records);
+      uploadMutation.mutate({ records: result.records, sourcetype: sourcetype || undefined });
     };
     reader.onerror = () => {
       setStatus('error');
@@ -241,6 +244,33 @@ export default function LogIngestionPage() {
                 <Upload className="w-4 h-4 text-primary" /> Upload Log File
               </h3>
 
+              {/* Sourcetype picker */}
+              <div className="mb-4 flex items-center gap-3">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide shrink-0">Source type</label>
+                <select
+                  value={sourcetype}
+                  onChange={e => setSourcetype(e.target.value)}
+                  aria-label="Source type"
+                  className="flex-1 bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer"
+                >
+                  <option value="">Auto-detect</option>
+                  <option value="syslog">syslog — RFC 3164/5424</option>
+                  <option value="windows_eventlog">windows_eventlog — Windows Event Log</option>
+                  <option value="cef">cef — Common Event Format</option>
+                  <option value="leef">leef — Log Event Extended Format</option>
+                  <option value="ecs">ecs — Elastic Common Schema</option>
+                  <option value="cloudtrail">cloudtrail — AWS CloudTrail</option>
+                  <option value="vpc_flow">vpc_flow — AWS VPC Flow</option>
+                  <option value="xml">xml — XML / Windows EVTX</option>
+                  <option value="apache">apache — Apache Access Log</option>
+                  <option value="nginx">nginx — NGINX Access Log</option>
+                  <option value="firewall">firewall — Firewall Log</option>
+                  <option value="dns">dns — DNS Log</option>
+                  <option value="json">json — Generic JSON</option>
+                  <option value="generic">generic — Generic text</option>
+                </select>
+              </div>
+
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
                 onDragLeave={() => setDragging(false)}
@@ -253,7 +283,7 @@ export default function LogIngestionPage() {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".json,.csv,.log,.txt,.syslog"
+                  accept=".json,.csv,.log,.txt,.syslog,.xml,.evtx"
                   aria-label="Upload log file"
                   className="hidden"
                   onChange={(e) => handleFiles(e.target.files)}
@@ -316,6 +346,7 @@ export default function LogIngestionPage() {
                     { fmt: 'CEF / LEEF', desc: 'ArcSight / QRadar', icon: '|' },
                     { fmt: 'VPC Flow', desc: 'AWS flow logs', icon: '↔' },
                     { fmt: 'Apache', desc: 'CLF / Combined', icon: '→' },
+                    { fmt: 'XML', desc: 'Windows EVTX', icon: '<>' },
                   ].map(f => (
                     <div key={f.fmt} className="bg-secondary/40 border border-border rounded-lg p-3 text-center">
                       <div className="font-mono text-lg text-primary mb-1">{f.icon}</div>

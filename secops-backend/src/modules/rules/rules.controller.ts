@@ -19,25 +19,42 @@ export async function getRule(req: Request, res: Response): Promise<void> {
 }
 
 export async function createRule(req: Request, res: Response): Promise<void> {
-  const { name, description, severity, yamlContent, logSource, mitreIds, mitreTactic, tags } = req.body;
+  const {
+    name, description, severity, yamlContent, logSource, mitreIds, mitreTactic, tags,
+    ruleType, splQuery, splThreshold, scheduleInterval,
+  } = req.body;
   if (!name || !severity) {
     res.status(400).json({ error: "name and severity are required" });
     return;
   }
+
+  // Validate SPL saved search
+  if (ruleType === "spl_saved_search" && !splQuery) {
+    res.status(400).json({ error: "splQuery is required for spl_saved_search rules" });
+    return;
+  }
+
   const rule = await rulesService.createRule({
     name, description, severity, yamlContent, logSource, mitreIds, mitreTactic, tags,
+    ruleType: ruleType ?? "sigma",
+    splQuery: splQuery ?? null,
+    splThreshold: splThreshold != null ? Number(splThreshold) : 1,
+    scheduleInterval: scheduleInterval ?? "15m",
     createdBy: req.user!.userId,
   });
   invalidateEngine();
-  await logAuditEvent(req, "rules.create", { resource: "rules", resourceId: rule.id, metadata: { name } });
+  await logAuditEvent(req, "rules.create", { resource: "rules", resourceId: rule.id, metadata: { name, ruleType: rule.ruleType } });
   res.status(201).json({ rule });
 }
 
 export async function updateRule(req: Request, res: Response): Promise<void> {
-  const { name, description, severity, yamlContent, mitreIds } = req.body;
+  const { name, description, severity, yamlContent, mitreIds, ruleType, splQuery, splThreshold, scheduleInterval } = req.body;
   const id = req.params.id as string;
   const rule = await rulesService.updateRule(id, {
-    name, description, severity, yamlContent, mitreIds, updatedBy: req.user!.userId,
+    name, description, severity, yamlContent, mitreIds,
+    ruleType, splQuery, splThreshold: splThreshold != null ? Number(splThreshold) : undefined,
+    scheduleInterval,
+    updatedBy: req.user!.userId,
   });
   if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
   invalidateEngine();
@@ -60,88 +77,73 @@ export async function toggleRule(req: Request, res: Response): Promise<void> {
     return;
   }
   const id = req.params.id as string;
-  const rule = await rulesService.toggleRule(id, enabled, req.user!.userId);
+  const rule = await rulesService.toggleRule(id, enabled);
   if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
   invalidateEngine();
-  await logAuditEvent(req, enabled ? "rules.enable" : "rules.disable", { resource: "rules", resourceId: id });
+  await logAuditEvent(req, "rules.toggle", { resource: "rules", resourceId: id, metadata: { enabled } });
   res.json({ rule });
 }
 
 export async function testRule(req: Request, res: Response): Promise<void> {
-  const { yamlContent, events } = req.body;
-  if (!yamlContent || !Array.isArray(events)) {
-    res.status(400).json({ error: "yamlContent (string) and events (array) are required" });
+  const id = req.params.id as string;
+  const rule = await rulesService.getRuleById(id);
+  if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
+
+  // Get recent events
+  const recentLogs = await db.select()
+    .from((await import("../../db")).rawLogsTable)
+    .where(gte((await import("../../db")).rawLogsTable.createdAt, new Date(Date.now() - 3600_000)))
+    .limit(200)
+    .orderBy(sql`created_at desc`);
+
+  if (recentLogs.length === 0) {
+    res.json({ matchCount: 0, sampleMatches: [], message: "No events in the last hour to test against" });
     return;
   }
 
-  const testEvents = events.map((e: any) => ({
-    ...e,
-    timestamp: e.timestamp ? new Date(e.timestamp) : new Date(),
-  }));
+  // Run the loaded rule against these events
+  await detectionEngine.loadRulesFromDb();
+  const matches: any[] = [];
+  for (const log of recentLogs) {
+    const msgStr = log.message ?? JSON.stringify(log.rawData ?? {});
+    const detected = await detectionEngine.testSingleEvent({
+      id: log.id,
+      message: msgStr,
+      source: log.source,
+      severity: log.severity,
+      sourceIp: log.sourceIp ?? "",
+      destIp: log.destIp ?? "",
+      hostname: log.hostname ?? "",
+      username: log.username ?? "",
+      category: log.category ?? "",
+      action: log.action ?? "",
+      processName: log.processName ?? "",
+      processCommandLine: log.processCommandLine ?? "",
+      eventType: log.eventType ?? "",
+      httpUrl: log.httpUrl ?? "",
+      registryKey: log.registryKey ?? "",
+      rawData: log.rawData,
+    }, rule.id);
+    if (detected) matches.push({ logId: log.id, message: msgStr, source: log.source, severity: log.severity });
+    if (matches.length >= 5) break;
+  }
 
-  const results = detectionEngine.testRule(yamlContent, testEvents);
-  res.json({ matches: results.length, alerts: results });
+  res.json({ matchCount: matches.length, sampleMatches: matches.slice(0, 5) });
 }
 
 export async function getRuleStats(req: Request, res: Response): Promise<void> {
-  const ruleId = req.params.id as string;
-  const rule = await rulesService.getRuleById(ruleId);
+  const id = req.params.id as string;
+  const rule = await rulesService.getRuleById(id);
   if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
 
-  const now = new Date();
-  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const last7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  const [
-    totalAlerts,
-    alertsLast24h,
-    alertsLast7d,
-    alertsBySeverity,
-    recentAlerts,
-    hourlyTrend,
-  ] = await Promise.all([
-    db.select({ count: sql<number>`count(*)` }).from(alertsTable)
-      .where(eq(alertsTable.ruleId, ruleId)),
-    db.select({ count: sql<number>`count(*)` }).from(alertsTable)
-      .where(and(eq(alertsTable.ruleId, ruleId), gte(alertsTable.createdAt, last24h))),
-    db.select({ count: sql<number>`count(*)` }).from(alertsTable)
-      .where(and(eq(alertsTable.ruleId, ruleId), gte(alertsTable.createdAt, last7d))),
-    db.select({ severity: alertsTable.severity, count: sql<number>`count(*)` }).from(alertsTable)
-      .where(eq(alertsTable.ruleId, ruleId))
-      .groupBy(alertsTable.severity),
-    db.select({
-      id: alertsTable.id,
-      alertCode: alertsTable.alertCode,
-      title: alertsTable.title,
-      severity: alertsTable.severity,
-      status: alertsTable.status,
-      createdAt: alertsTable.createdAt,
-    }).from(alertsTable)
-      .where(eq(alertsTable.ruleId, ruleId))
-      .orderBy(sql`created_at DESC`)
+  const [alertCount, recentAlerts] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` }).from(alertsTable).where(eq(alertsTable.ruleId, id)),
+    db.select({ createdAt: alertsTable.createdAt, severity: alertsTable.severity, status: alertsTable.status })
+      .from(alertsTable)
+      .where(and(eq(alertsTable.ruleId, id), gte(alertsTable.createdAt, new Date(Date.now() - 7 * 86_400_000))))
+      .orderBy(sql`created_at desc`)
       .limit(10),
-    db.select({
-      hour: sql<string>`to_char(date_trunc('hour', created_at), 'HH24:00')`,
-      count: sql<number>`count(*)`,
-    }).from(alertsTable)
-      .where(and(eq(alertsTable.ruleId, ruleId), gte(alertsTable.createdAt, last24h)))
-      .groupBy(sql`date_trunc('hour', created_at)`)
-      .orderBy(sql`date_trunc('hour', created_at)`),
   ]);
 
-  const sevMap: Record<string, number> = {};
-  alertsBySeverity.forEach((r) => { sevMap[r.severity] = Number(r.count); });
-
-  res.json({
-    ruleId,
-    ruleName: rule.name,
-    triggerCount: rule.triggerCount ?? 0,
-    falsePositiveRate: rule.falsePositiveRate ?? 0,
-    totalAlerts: Number(totalAlerts[0]?.count ?? 0),
-    alertsLast24h: Number(alertsLast24h[0]?.count ?? 0),
-    alertsLast7d: Number(alertsLast7d[0]?.count ?? 0),
-    alertsBySeverity: sevMap,
-    recentAlerts,
-    hourlyTrend: hourlyTrend.map((r) => ({ hour: r.hour, count: Number(r.count) })),
-  });
+  res.json({ rule, alertCount: Number(alertCount[0]?.count ?? 0), recentAlerts });
 }

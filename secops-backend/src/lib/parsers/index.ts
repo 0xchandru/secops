@@ -12,8 +12,9 @@ import "./cloudtrail";
 import "./apache-nginx";
 import "./vpc-flow";
 import "./dns-query";
+import "./xml";
 
-export type SourceType = "syslog" | "windows_eventlog" | "firewall" | "cef" | "ecs" | "leef" | "cloudtrail" | "apache" | "nginx" | "vpc_flow" | "dns" | "generic";
+export type SourceType = "syslog" | "windows_eventlog" | "firewall" | "cef" | "ecs" | "leef" | "cloudtrail" | "apache" | "nginx" | "vpc_flow" | "dns" | "xml" | "generic";
 
 export function parseLog(raw: string, sourceType: string, sourceHost: string): ParsedEvent | null {
   return parseLogViaRegistry(raw, sourceType, sourceHost, parseGeneric);

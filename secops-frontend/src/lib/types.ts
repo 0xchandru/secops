@@ -23,6 +23,9 @@ export interface LogEntry {
   rawLog: string;
   parsed: Record<string, any>;
   tags: string[];
+  // Splunk-compatible
+  sourcetype?: string;
+  indexName?: string;
   // Network
   direction?: string;
   bytesIn?: number;
@@ -113,6 +116,10 @@ export interface DetectionRule {
   updatedAt: Date;
   author: string;
   triggerCount: number;
+  ruleType?: string;
+  splQuery?: string;
+  splThreshold?: number;
+  scheduleInterval?: string;
 }
 
 export interface MitreTactic {

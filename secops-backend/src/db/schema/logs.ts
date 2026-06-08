@@ -11,6 +11,11 @@ export const rawLogsTable = pgTable("raw_logs", {
   action: text("action"),
   outcome: text("outcome"),
 
+  // Splunk-compatible fields
+  sourcetype: text("sourcetype"),
+  indexName: text("index_name").default("main"),
+  linecount: integer("linecount"),
+
   // Network
   sourceIp: text("source_ip"),
   destIp: text("dest_ip"),
@@ -99,6 +104,7 @@ export const rawLogsTable = pgTable("raw_logs", {
   index("idx_raw_logs_event_type").on(table.eventType),
   index("idx_raw_logs_action").on(table.action),
   index("idx_raw_logs_processed").on(table.processed),
+  index("idx_raw_logs_sourcetype").on(table.sourcetype),
 ]);
 
 export const insertRawLogSchema = createInsertSchema(rawLogsTable).omit({

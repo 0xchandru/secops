@@ -25,6 +25,10 @@ import { eq, ne, gt, gte, lt, lte, ilike, and, or, not, isNotNull, sql, type SQL
 const FIELD_COLUMN_MAP: Record<string, any> = {
   source: rawLogsTable.source,
   severity: rawLogsTable.severity,
+  sourcetype: rawLogsTable.sourcetype,
+  source_type: rawLogsTable.sourcetype,
+  index: rawLogsTable.indexName,
+  index_name: rawLogsTable.indexName,
   eventtype: rawLogsTable.eventType,
   event_type: rawLogsTable.eventType,
   category: rawLogsTable.category,

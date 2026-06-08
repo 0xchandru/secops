@@ -7,12 +7,13 @@ import { logAuditEvent } from "../../lib/audit";
 import { processLogRecord, processLogsBatch, tryEnqueueLog } from "../../lib/detection/pipeline";
 import { incrementEps } from "../../lib/redis";
 import { parseSplQuery } from "../../lib/search/spl-parser";
+import { executeSplPipes } from "../../lib/search/spl-executor";
 import type { Request, Response } from "express";
 
 const router = Router();
 
 router.post("/ingest-log", requireAuth, can("ingest:write"), async (req: Request, res: Response) => {
-  const { source, severity, eventType, sourceIp, destIp, hostname, username, message, rawData } = req.body;
+  const { source, severity, eventType, sourceIp, destIp, hostname, username, message, rawData, sourcetype } = req.body;
 
   if (!source) {
     res.status(400).json({ error: "source is required" });
@@ -29,12 +30,12 @@ router.post("/ingest-log", requireAuth, can("ingest:write"), async (req: Request
     username,
     message,
     rawData: rawData ?? null,
+    sourcetype: sourcetype ?? null,
     processed: "false",
   }).returning();
 
   await logAuditEvent(req, "ingest.log", { resource: "ingest", resourceId: log.id, metadata: { source, severity } });
 
-  // Try Redis queue first, fall back to inline processing
   const rawMsg = message ?? JSON.stringify(rawData ?? {});
   const enqueued = await tryEnqueueLog(log.id, rawMsg, source, hostname ?? sourceIp ?? "unknown", {
     srcIp: sourceIp ?? "",
@@ -89,7 +90,7 @@ router.post("/ingest/detections", requireAuth, can("ingest:write"), async (req: 
 });
 
 router.post("/ingest/bulk", requireAuth, can("ingest:write"), async (req: Request, res: Response) => {
-  const { logs } = req.body;
+  const { logs, sourcetype: bulkSourcetype } = req.body;
   if (!Array.isArray(logs) || logs.length === 0) {
     res.status(400).json({ error: "logs must be a non-empty array" });
     return;
@@ -111,18 +112,26 @@ router.post("/ingest/bulk", requireAuth, can("ingest:write"), async (req: Reques
     username: l.username ?? l.user ?? undefined,
     message: l.message ?? l.msg ?? l.Message ?? JSON.stringify(l),
     rawData: l as any,
+    sourcetype: l.sourcetype ?? l.source_type ?? bulkSourcetype ?? null,
+    linecount: l.linecount ?? null,
     processed: "false" as const,
   }));
 
-  const inserted = await db.insert(rawLogsTable).values(values).returning({ id: rawLogsTable.id, message: rawLogsTable.message, source: rawLogsTable.source, hostname: rawLogsTable.hostname, sourceIp: rawLogsTable.sourceIp, username: rawLogsTable.username });
+  const inserted = await db.insert(rawLogsTable).values(values).returning({
+    id: rawLogsTable.id,
+    message: rawLogsTable.message,
+    source: rawLogsTable.source,
+    hostname: rawLogsTable.hostname,
+    sourceIp: rawLogsTable.sourceIp,
+    username: rawLogsTable.username,
+  });
 
   await logAuditEvent(req, "ingest.bulk", {
     resource: "ingest",
     resourceId: inserted[0]?.id,
-    metadata: { count: inserted.length },
+    metadata: { count: inserted.length, sourcetype: bulkSourcetype },
   });
 
-  // Run detection asynchronously on all inserted logs
   processLogsBatch(inserted.map(l => ({ id: l.id, message: l.message ?? "", source: l.source, hostname: l.hostname ?? undefined, sourceIp: l.sourceIp ?? undefined, username: l.username ?? undefined }))).catch(() => {});
 
   res.status(201).json({ inserted: inserted.length });
@@ -136,7 +145,6 @@ router.get("/logs", requireAuth, can("alerts:view"), async (req: Request, res: R
 
   const conditions = [];
 
-  // Handle relative time range (e.g. "15m", "1h", "6h", "24h", "7d", "30d")
   if (from && !startTime) {
     const match = /^(\d+)([mhd])$/.exec(from);
     if (match) {
@@ -147,16 +155,13 @@ router.get("/logs", requireAuth, can("alerts:view"), async (req: Request, res: R
     }
   }
 
-  // SPL-like query (new) — takes precedence over legacy filters when present
   const splQuery = q || search;
   if (splQuery) {
-    // Check if it looks like an SPL query (contains = or |)
     const isSpl = /[=|><]/.test(splQuery);
     if (isSpl) {
       const parsed = parseSplQuery(splQuery);
       if (parsed.conditions) conditions.push(parsed.conditions);
     } else {
-      // Plain text search across key fields
       const pattern = `%${splQuery}%`;
       conditions.push(
         sql`(${rawLogsTable.message} ilike ${pattern} OR ${rawLogsTable.sourceIp} ilike ${pattern} OR ${rawLogsTable.eventType} ilike ${pattern} OR ${rawLogsTable.username} ilike ${pattern} OR ${rawLogsTable.hostname} ilike ${pattern} OR ${rawLogsTable.action} ilike ${pattern} OR ${rawLogsTable.dnsQuery} ilike ${pattern} OR ${rawLogsTable.httpUrl} ilike ${pattern})`
@@ -164,7 +169,6 @@ router.get("/logs", requireAuth, can("alerts:view"), async (req: Request, res: R
     }
   }
 
-  // Legacy filters (still applied as additional AND conditions)
   if (source) conditions.push(eq(rawLogsTable.source, source));
   if (severity) conditions.push(eq(rawLogsTable.severity, severity));
   if (category) conditions.push(eq(rawLogsTable.category as any, category));
@@ -182,21 +186,82 @@ router.get("/logs", requireAuth, can("alerts:view"), async (req: Request, res: R
   res.json({ logs, total: Number(count), page: pageNum, limit: limitNum });
 });
 
-// Dynamic filter options — returns distinct values for source, severity, category
+// ─── SPL Full Execution Endpoint ──────────────────────────────────────────────
+// POST /logs/spl — executes a full SPL query including pipe transformations
+// Returns: { results, count, took, pipe? }
+router.post("/logs/spl", requireAuth, can("alerts:view"), async (req: Request, res: Response) => {
+  const { query, from: relFrom, limit: limitParam = 10_000 } = req.body as {
+    query?: string;
+    from?: string;
+    limit?: number;
+  };
+
+  if (!query?.trim()) {
+    res.status(400).json({ error: "query is required" });
+    return;
+  }
+
+  const start = Date.now();
+  const maxRows = Math.min(50_000, Math.max(1, Number(limitParam)));
+  const conditions: SQL[] = [];
+
+  // Time range
+  if (relFrom) {
+    const match = /^(\d+)([mhd])$/.exec(relFrom);
+    if (match) {
+      const amount = Number(match[1]);
+      const unit = match[2];
+      const ms = unit === "m" ? amount * 60_000 : unit === "h" ? amount * 3_600_000 : amount * 86_400_000;
+      conditions.push(gte(rawLogsTable.createdAt, new Date(Date.now() - ms)));
+    }
+  }
+
+  const parsed = parseSplQuery(query);
+  if (parsed.conditions) conditions.push(parsed.conditions);
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const rows = await db.select()
+    .from(rawLogsTable)
+    .where(where)
+    .orderBy(desc(rawLogsTable.createdAt))
+    .limit(maxRows);
+
+  // Apply pipe transformations in memory
+  let results: Record<string, unknown>[];
+  if (parsed.pipe) {
+    results = executeSplPipes(rows as Record<string, unknown>[], parsed.pipe);
+  } else {
+    results = rows as Record<string, unknown>[];
+  }
+
+  const took = Date.now() - start;
+  res.json({
+    results,
+    count: results.length,
+    took,
+    pipe: parsed.pipe ?? null,
+    baseQuery: query.split("|")[0].trim(),
+  });
+});
+
+// Dynamic filter options
 router.get("/logs/filters", requireAuth, can("alerts:view"), async (_req: Request, res: Response) => {
-  const [sources, severities, categories] = await Promise.all([
+  const [sources, severities, categories, sourcetypes] = await Promise.all([
     db.selectDistinct({ value: rawLogsTable.source }).from(rawLogsTable).limit(100),
     db.selectDistinct({ value: rawLogsTable.severity }).from(rawLogsTable).limit(20),
     db.selectDistinct({ value: rawLogsTable.category }).from(rawLogsTable).where(sql`${rawLogsTable.category} is not null`).limit(100),
+    db.selectDistinct({ value: rawLogsTable.sourcetype }).from(rawLogsTable).where(sql`${rawLogsTable.sourcetype} is not null`).limit(50),
   ]);
   res.json({
     sources: sources.map(r => r.value),
     severities: severities.map(r => r.value),
     categories: categories.map(r => r.value).filter(Boolean),
+    sourcetypes: sourcetypes.map(r => r.value).filter(Boolean),
   });
 });
 
-// Field facets — returns top values and counts for specified fields (Splunk-like sidebar)
+// Field facets
 router.post("/logs/facets", requireAuth, can("alerts:view"), async (req: Request, res: Response) => {
   const { fields, limit: facetLimit = 15, from: relFrom, q: searchQuery } = req.body as {
     fields?: string[];
@@ -225,12 +290,12 @@ router.post("/logs/facets", requireAuth, can("alerts:view"), async (req: Request
     facilityName: rawLogsTable.facilityName,
     processName: rawLogsTable.processName,
     dnsResponseCode: rawLogsTable.dnsResponseCode,
+    sourcetype: rawLogsTable.sourcetype,
   };
 
   const requestedFields = fields && fields.length > 0 ? fields : Object.keys(FACET_COLUMNS);
   const maxLimit = Math.min(50, Math.max(1, facetLimit));
 
-  // Optional time-range and search conditions
   const conditions: SQL[] = [];
   if (relFrom) {
     const match = /^(\d+)([mhd])$/.exec(relFrom);
@@ -274,18 +339,14 @@ router.post("/logs/facets", requireAuth, can("alerts:view"), async (req: Request
   res.json({ facets });
 });
 
-// Event histogram — bucketed event counts over time
+// Event histogram
 router.post("/events/histogram", requireAuth, can("alerts:view"), async (req: Request, res: Response) => {
   const { startTime, endTime, interval = "1h", source, severity, hours } = req.body;
   const start = startTime ? new Date(startTime) : hours ? new Date(Date.now() - Number(hours) * 3_600_000) : new Date(Date.now() - 24 * 60 * 60 * 1000);
   const end = endTime ? new Date(endTime) : new Date();
 
   const intervalSeconds: Record<string, number> = {
-    "5m": 300,
-    "15m": 900,
-    "1h": 3600,
-    "6h": 21600,
-    "1d": 86400,
+    "5m": 300, "15m": 900, "1h": 3600, "6h": 21600, "1d": 86400,
   };
   const bucketSize = intervalSeconds[interval] ?? 3600;
 
@@ -316,7 +377,7 @@ router.post("/events/histogram", requireAuth, can("alerts:view"), async (req: Re
   });
 });
 
-// Host context — all events and alerts related to a specific host
+// Host context
 router.get("/events/context/:host", requireAuth, can("alerts:view"), async (req: Request, res: Response) => {
   const host = String(req.params.host);
   const limit = Math.min(200, Number(req.query.limit ?? 50));
@@ -363,12 +424,11 @@ router.get("/events/context/:host", requireAuth, can("alerts:view"), async (req:
   });
 });
 
-// ─── Raw Text Ingestion ──────────────────────────────────────────────────────
-// Accepts raw syslog / plain text lines (newline-delimited).
-// Content-Type: text/plain  — each line becomes one log record.
+// Raw Text Ingestion
 router.post("/ingest/raw", requireAuth, can("ingest:write"), async (req: Request, res: Response) => {
   const source = (req.query.source as string) || (req.headers["x-log-source"] as string) || "raw-text";
   const hostname = (req.query.hostname as string) || (req.headers["x-log-hostname"] as string) || "unknown";
+  const sourcetype = (req.query.sourcetype as string) || (req.headers["x-log-sourcetype"] as string) || null;
 
   let body = "";
   if (typeof req.body === "string") {
@@ -398,6 +458,8 @@ router.post("/ingest/raw", requireAuth, can("ingest:write"), async (req: Request
     hostname,
     message: line,
     rawData: { raw: line } as any,
+    sourcetype,
+    linecount: 1,
     processed: "false" as const,
   }));
 
@@ -413,7 +475,7 @@ router.post("/ingest/raw", requireAuth, can("ingest:write"), async (req: Request
   await logAuditEvent(req, "ingest.raw", {
     resource: "ingest",
     resourceId: inserted[0]?.id,
-    metadata: { count: inserted.length, source },
+    metadata: { count: inserted.length, source, sourcetype },
   });
 
   processLogsBatch(inserted.map(l => ({
@@ -425,12 +487,12 @@ router.post("/ingest/raw", requireAuth, can("ingest:write"), async (req: Request
     username: l.username ?? undefined,
   }))).catch(() => {});
 
-  res.status(201).json({ inserted: inserted.length, source });
+  res.status(201).json({ inserted: inserted.length, source, sourcetype });
 });
 
-// ─── Pipeline Statistics ─────────────────────────────────────────────────────
+// Pipeline Statistics
 router.get("/ingest/stats", requireAuth, can("alerts:view"), async (_req: Request, res: Response) => {
-  const [totals, bySource, bySeverity, byProcessed, recent24h] = await Promise.all([
+  const [totals, bySource, bySeverity, byProcessed, recent24h, bySourcetype] = await Promise.all([
     db.select({ count: sql<number>`count(*)` }).from(rawLogsTable),
     db.select({ source: rawLogsTable.source, count: sql<number>`count(*)` })
       .from(rawLogsTable)
@@ -446,6 +508,12 @@ router.get("/ingest/stats", requireAuth, can("alerts:view"), async (_req: Reques
     db.select({ count: sql<number>`count(*)` })
       .from(rawLogsTable)
       .where(gte(rawLogsTable.createdAt, new Date(Date.now() - 86_400_000))),
+    db.select({ sourcetype: rawLogsTable.sourcetype, count: sql<number>`count(*)` })
+      .from(rawLogsTable)
+      .where(sql`${rawLogsTable.sourcetype} is not null`)
+      .groupBy(rawLogsTable.sourcetype)
+      .orderBy(sql`count(*) desc`)
+      .limit(20),
   ]);
 
   const processedMap: Record<string, number> = {};
@@ -459,10 +527,11 @@ router.get("/ingest/stats", requireAuth, can("alerts:view"), async (_req: Reques
     unparseable: Number(processedMap["unparseable"] ?? 0),
     bySource: bySource.map(r => ({ source: r.source, count: Number(r.count) })),
     bySeverity: bySeverity.map(r => ({ severity: r.severity, count: Number(r.count) })),
+    bySourcetype: bySourcetype.map(r => ({ sourcetype: r.sourcetype, count: Number(r.count) })),
   });
 });
 
-// ─── Reprocess unprocessed/unparseable logs ──────────────────────────────────
+// Reprocess unprocessed/unparseable logs
 router.post("/ingest/reprocess", requireAuth, can("ingest:write"), async (req: Request, res: Response) => {
   const limit = Math.min(1000, Number(req.body.limit ?? 500));
   const status = req.body.status === "unparseable" ? "unparseable" : "false";

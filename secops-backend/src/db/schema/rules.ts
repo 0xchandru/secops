@@ -17,6 +17,16 @@ export const rulesTable = pgTable("rules", {
   triggerCount: integer("trigger_count").notNull().default(0),
   tags: text("tags").array(),
   falsePositiveRate: integer("false_positive_rate").notNull().default(0),
+
+  // Rule type: "sigma" (default), "spl_saved_search", "threshold", "correlation"
+  ruleType: text("rule_type").default("sigma"),
+
+  // SPL saved search fields
+  splQuery: text("spl_query"),
+  splThreshold: integer("spl_threshold").default(1),
+  scheduleInterval: text("schedule_interval").default("15m"),
+  lastRunAt: timestamp("last_run_at"),
+
   createdBy: uuid("created_by").references(() => usersTable.id),
   updatedBy: uuid("updated_by").references(() => usersTable.id),
   lastModifiedAt: timestamp("last_modified_at").notNull().defaultNow(),
@@ -31,6 +41,7 @@ export const insertRuleSchema = createInsertSchema(rulesTable).omit({
   createdAt: true,
   updatedAt: true,
   lastModifiedAt: true,
+  lastRunAt: true,
 });
 
 export type Rule = typeof rulesTable.$inferSelect;

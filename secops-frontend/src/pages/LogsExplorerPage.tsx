@@ -11,8 +11,9 @@ import {
   ChevronsRight, SlidersHorizontal, Loader2, Database, Radio, BarChart3, Shield, Globe,
   Tag, CalendarDays, Columns, Download, RefreshCw, AlertTriangle, Activity, Zap,
   Copy, Check, Clock, Save, History, ChevronRight as ChevronR, PanelLeftClose, PanelLeft,
-  Hash, Terminal, Bookmark, Trash2, Play
+  Hash, Terminal, Bookmark, Trash2, Play, Bell, Filter, Code2, Cpu
 } from 'lucide-react';
+import { rulesApi } from '@/lib/api';
 import type { LogEntry } from '@/lib/types';
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
@@ -79,6 +80,31 @@ const FIELD_LABELS: Record<string, string> = {
   username: 'user', protocol: 'protocol', outcome: 'outcome', geoCountry: 'geoCountry',
   processName: 'process', httpMethod: 'httpMethod',
 };
+
+const SOURCETYPE_BADGE: Record<string, { label: string; cls: string }> = {
+  syslog: { label: 'SYSLOG', cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  windows_eventlog: { label: 'WINDOWS', cls: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
+  cef: { label: 'CEF', cls: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
+  leef: { label: 'LEEF', cls: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' },
+  ecs: { label: 'ECS', cls: 'bg-green-500/10 text-green-400 border-green-500/20' },
+  cloudtrail: { label: 'CLOUDTRAIL', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  xml: { label: 'XML', cls: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
+  firewall: { label: 'FIREWALL', cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  apache: { label: 'APACHE', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  nginx: { label: 'NGINX', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
+  vpc_flow: { label: 'VPC FLOW', cls: 'bg-teal-500/10 text-teal-400 border-teal-500/20' },
+  dns: { label: 'DNS', cls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' },
+  json: { label: 'JSON', cls: 'bg-sky-500/10 text-sky-400 border-sky-500/20' },
+  generic: { label: 'GENERIC', cls: 'bg-secondary text-muted-foreground border-border' },
+};
+
+const SCHEDULE_INTERVALS = [
+  { value: '5m', label: 'Every 5 min' },
+  { value: '15m', label: 'Every 15 min' },
+  { value: '1h', label: 'Every hour' },
+  { value: '6h', label: 'Every 6 hours' },
+  { value: '24h', label: 'Daily' },
+];
 
 // Maps detail panel display name → facet filter key for click-to-filter
 const DETAIL_FIELD_TO_FILTER: Record<string, string> = {
@@ -158,6 +184,20 @@ export default function LogsExplorerPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [fieldSearch, setFieldSearch] = useState('');
 
+  // Inline row expansion (Splunk-style)
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+
+  // Save as Alert dialog
+  const [showSaveAlertDialog, setShowSaveAlertDialog] = useState(false);
+  const [saveAlertName, setSaveAlertName] = useState('');
+  const [saveAlertDesc, setSaveAlertDesc] = useState('');
+  const [saveAlertInterval, setSaveAlertInterval] = useState('15m');
+  const [saveAlertThreshold, setSaveAlertThreshold] = useState(1);
+  const [saveAlertSeverity, setSaveAlertSeverity] = useState('medium');
+  const [saveAlertLoading, setSaveAlertLoading] = useState(false);
+  const [saveAlertError, setSaveAlertError] = useState<string | null>(null);
+  const [saveAlertSuccess, setSaveAlertSuccess] = useState(false);
+
   const { events: liveEvents, isConnected: liveConnected, clear: clearLive } = useEventStream();
 
   /* ── Search Logic ── */
@@ -224,6 +264,36 @@ export default function LogsExplorerPage() {
     setSavedSearches(updated);
     saveSavedSearches(updated);
   }, [savedSearches]);
+
+  const saveSplAsAlert = useCallback(async () => {
+    if (!saveAlertName.trim() || !searchTerm.trim()) return;
+    setSaveAlertLoading(true);
+    setSaveAlertError(null);
+    setSaveAlertSuccess(false);
+    try {
+      await rulesApi.create({
+        name: saveAlertName.trim(),
+        description: saveAlertDesc.trim() || `SPL Alert: ${searchTerm.trim().slice(0, 200)}`,
+        severity: saveAlertSeverity,
+        ruleType: 'spl_saved_search',
+        splQuery: searchTerm.trim(),
+        splThreshold: saveAlertThreshold,
+        scheduleInterval: saveAlertInterval,
+        enabled: true,
+      });
+      setSaveAlertSuccess(true);
+      setTimeout(() => {
+        setShowSaveAlertDialog(false);
+        setSaveAlertName('');
+        setSaveAlertDesc('');
+        setSaveAlertSuccess(false);
+      }, 1500);
+    } catch (err: any) {
+      setSaveAlertError(err?.response?.data?.error ?? 'Failed to save alert');
+    } finally {
+      setSaveAlertLoading(false);
+    }
+  }, [saveAlertName, saveAlertDesc, searchTerm, saveAlertSeverity, saveAlertThreshold, saveAlertInterval]);
 
   const addFieldFilter = useCallback((field: string, value: string, negate = false) => {
     setActiveFieldFilters(prev => {
@@ -473,11 +543,18 @@ export default function LogsExplorerPage() {
                   </button>
                 )}
                 {searchTerm.trim() && (
-                  <button onClick={() => setShowSaveDialog(true)}
-                    title="Save search"
-                    className="p-1.5 text-muted-foreground hover:text-primary rounded-lg hover:bg-primary/10 transition-colors">
-                    <Bookmark className="w-3.5 h-3.5" />
-                  </button>
+                  <>
+                    <button onClick={() => setShowSaveDialog(true)}
+                      title="Save search"
+                      className="p-1.5 text-muted-foreground hover:text-primary rounded-lg hover:bg-primary/10 transition-colors">
+                      <Bookmark className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => { setSaveAlertName(''); setSaveAlertDesc(''); setSaveAlertError(null); setSaveAlertSuccess(false); setShowSaveAlertDialog(true); }}
+                      title="Save as Alert (SPL saved search)"
+                      className="p-1.5 text-muted-foreground hover:text-amber-400 rounded-lg hover:bg-amber-400/10 transition-colors">
+                      <Bell className="w-3.5 h-3.5" />
+                    </button>
+                  </>
                 )}
                 <button onClick={executeSearch}
                   title="Run search (Enter)"
@@ -914,10 +991,13 @@ export default function LogsExplorerPage() {
                     <tbody className="divide-y divide-border/30">
                       {sortedLogs.map(log => {
                         const sevColor = SEVERITY_COLORS[log.severity] || SEVERITY_COLORS.info;
+                        const isExpanded = expandedLogId === log.id;
+                        const stBadge = log.sourcetype ? (SOURCETYPE_BADGE[log.sourcetype] ?? { label: log.sourcetype.toUpperCase(), cls: 'bg-secondary text-muted-foreground border-border' }) : null;
                         return (
-                          <tr key={log.id}
-                            className={`hover:bg-secondary/40 transition-all cursor-pointer group ${selectedLog?.id === log.id ? 'bg-primary/5 ring-1 ring-inset ring-primary/20' : ''}`}
-                            onClick={() => setSelectedLog(selectedLog?.id === log.id ? null : log)}>
+                          <React.Fragment key={log.id}>
+                          <tr
+                            className={`hover:bg-secondary/40 transition-all cursor-pointer group ${isExpanded ? 'bg-primary/5 border-b-0' : ''} ${selectedLog?.id === log.id ? 'ring-1 ring-inset ring-primary/20' : ''}`}
+                            onClick={() => setExpandedLogId(isExpanded ? null : log.id)}>
                             {visibleColumns.map(colKey => {
                               if (colKey === 'timestamp') return (
                                 <td key={colKey} className="px-4 py-3">
@@ -985,12 +1065,90 @@ export default function LogsExplorerPage() {
                               return null;
                             })}
                             <td className="px-4 py-3">
-                              <button aria-label="View log details"
-                                className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
-                                <Eye className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center gap-1">
+                                {stBadge && (
+                                  <span className={`hidden xl:inline-block text-[9px] font-mono font-bold px-1 py-0.5 rounded border ${stBadge.cls} opacity-0 group-hover:opacity-100 transition-opacity`}>
+                                    {stBadge.label}
+                                  </span>
+                                )}
+                                <button aria-label="View log details" onClick={(e) => { e.stopPropagation(); setSelectedLog(log); }}
+                                  className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 opacity-0 group-hover:opacity-100 ${isExpanded ? 'rotate-180 opacity-100' : ''}`} />
+                              </div>
                             </td>
                           </tr>
+                          {isExpanded && (
+                            <tr className="bg-secondary/5 border-b border-primary/10">
+                              <td colSpan={(visibleColumns.length + 1)} className="p-0">
+                                <div className="px-6 py-4 space-y-3">
+                                  {/* Header row */}
+                                  <div className="flex items-center gap-3 pb-2 border-b border-border/40">
+                                    <span className="font-mono text-xs text-muted-foreground">{safeFormat(log.timestamp, 'yyyy-MM-dd HH:mm:ss.SSS')}</span>
+                                    <SeverityBadge severity={log.severity} />
+                                    {stBadge && <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${stBadge.cls}`}>{stBadge.label}</span>}
+                                    {log.source && <span className="font-mono text-xs bg-secondary border border-border px-2 py-0.5 rounded">{log.source}</span>}
+                                    {log.indexName && <span className="text-[10px] text-muted-foreground font-mono">index={log.indexName}</span>}
+                                    <button onClick={(e) => { e.stopPropagation(); setSelectedLog(log); }}
+                                      className="ml-auto text-xs text-primary hover:underline flex items-center gap-1">
+                                      <Eye className="w-3 h-3" /> Full detail
+                                    </button>
+                                  </div>
+                                  {/* Message */}
+                                  {log.message && (
+                                    <div className="flex gap-2">
+                                      <span className="text-[11px] font-semibold text-muted-foreground w-24 shrink-0 pt-0.5">message</span>
+                                      <p className="text-xs text-foreground font-mono leading-relaxed break-all">{log.message}</p>
+                                    </div>
+                                  )}
+                                  {/* Field grid */}
+                                  <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-1.5">
+                                    {([
+                                      ['hostname', log.hostname],
+                                      ['sourceIp', log.sourceIp],
+                                      ['destIp', log.destIp],
+                                      ['srcPort', log.srcPort],
+                                      ['dstPort', log.dstPort],
+                                      ['protocol', log.protocol],
+                                      ['category', log.category],
+                                      ['eventType', log.eventType],
+                                      ['action', log.action],
+                                      ['outcome', log.outcome],
+                                      ['user', log.user],
+                                      ['process', log.processName],
+                                      ['pid', log.processId],
+                                      ['httpMethod', log.httpMethod],
+                                      ['httpUrl', log.httpUrl],
+                                      ['httpStatus', log.httpStatusCode],
+                                      ['dnsQuery', log.dnsQuery],
+                                      ['geoCountry', log.geoCountry],
+                                      ['riskScore', log.riskScore],
+                                    ] as [string, any][]).filter(([, v]) => v != null && v !== '').map(([k, v]) => (
+                                      <div key={k} className="flex items-baseline gap-2 min-w-0">
+                                        <button onClick={(e) => { e.stopPropagation(); addFieldFilter(k, String(v)); }}
+                                          className="text-[11px] font-semibold text-primary/70 hover:text-primary shrink-0 font-mono" title={`Filter ${k}=${v}`}>
+                                          {k}
+                                        </button>
+                                        <span className="text-xs text-muted-foreground font-mono truncate">=</span>
+                                        <span className="text-xs text-foreground font-mono truncate">{String(v)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  {/* Raw JSON toggle */}
+                                  {log.rawLog && (
+                                    <details className="group/raw">
+                                      <summary className="text-[11px] text-muted-foreground cursor-pointer select-none hover:text-foreground flex items-center gap-1">
+                                        <Code2 className="w-3 h-3" /> Raw event
+                                      </summary>
+                                      <pre className="mt-2 text-[10px] font-mono text-muted-foreground bg-black/30 rounded-lg p-3 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">{log.rawLog}</pre>
+                                    </details>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
@@ -1201,6 +1359,120 @@ export default function LogsExplorerPage() {
                   <pre className="text-xs font-mono text-green-400 bg-[#050810] border border-border rounded-xl p-4 overflow-x-auto whitespace-pre-wrap break-all max-h-80">{selectedLog.rawLog}</pre>
                 </div>
               )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Save as Alert Modal ─────────────────────────────────────────── */}
+      {showSaveAlertDialog && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setShowSaveAlertDialog(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg mx-4 pointer-events-auto overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-secondary/20">
+                <div className="flex items-center gap-2.5">
+                  <Bell className="w-5 h-5 text-amber-400" />
+                  <h2 className="font-semibold text-foreground">Save as Alert</h2>
+                  <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded">SPL SAVED SEARCH</span>
+                </div>
+                <button onClick={() => setShowSaveAlertDialog(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {/* SPL preview */}
+                <div className="bg-black/30 border border-border/50 rounded-xl px-4 py-3">
+                  <div className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Terminal className="w-3 h-3" /> Search Query
+                  </div>
+                  <p className="text-xs font-mono text-primary/90 break-all leading-relaxed line-clamp-3">{searchTerm}</p>
+                </div>
+
+                {/* Alert name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Alert Name *</label>
+                  <input
+                    autoFocus
+                    value={saveAlertName}
+                    onChange={e => setSaveAlertName(e.target.value)}
+                    placeholder="e.g., High severity brute force detection"
+                    className="w-full bg-input border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                  />
+                </div>
+
+                {/* Description */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Description</label>
+                  <input
+                    value={saveAlertDesc}
+                    onChange={e => setSaveAlertDesc(e.target.value)}
+                    placeholder="Optional description..."
+                    className="w-full bg-input border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                  />
+                </div>
+
+                {/* Severity + Schedule + Threshold row */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Severity</label>
+                    <select value={saveAlertSeverity} onChange={e => setSaveAlertSeverity(e.target.value)}
+                      className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer">
+                      <option value="critical">Critical</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                      <option value="info">Info</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Schedule</label>
+                    <select value={saveAlertInterval} onChange={e => setSaveAlertInterval(e.target.value)}
+                      className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer">
+                      {SCHEDULE_INTERVALS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Threshold</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={saveAlertThreshold}
+                      onChange={e => setSaveAlertThreshold(Math.max(1, Number(e.target.value)))}
+                      className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {saveAlertError && (
+                  <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3">
+                    <AlertTriangle className="w-4 h-4 shrink-0" />
+                    {saveAlertError}
+                  </div>
+                )}
+
+                {saveAlertSuccess && (
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                    <Check className="w-4 h-4 shrink-0" />
+                    Alert saved successfully! Rule will run on schedule.
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-border bg-secondary/10 flex items-center justify-end gap-3">
+                <button onClick={() => setShowSaveAlertDialog(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+                <button
+                  onClick={saveSplAsAlert}
+                  disabled={!saveAlertName.trim() || saveAlertLoading || saveAlertSuccess}
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-semibold text-sm rounded-xl transition-colors flex items-center gap-2"
+                >
+                  {saveAlertLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
+                  {saveAlertLoading ? 'Saving…' : 'Create Alert'}
+                </button>
+              </div>
             </div>
           </div>
         </>

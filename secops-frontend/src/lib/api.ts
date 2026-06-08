@@ -143,6 +143,8 @@ export function normalizeLog(raw: any): LogEntry {
     assetCriticality: raw.assetCriticality ?? undefined,
     ruleMatched: undefined,
     alertId: undefined,
+    sourcetype: raw.sourcetype ?? undefined,
+    indexName: raw.indexName ?? undefined,
   };
 }
 
@@ -161,6 +163,10 @@ export function normalizeRule(raw: any): DetectionRule {
     updatedAt: (() => { const d = raw.updatedAt ? new Date(raw.updatedAt) : null; return d && !isNaN(d.getTime()) ? d : new Date(); })(),
     author: raw.createdBy ?? "system",
     triggerCount: raw.triggerCount ?? 0,
+    ruleType: raw.ruleType ?? "sigma",
+    splQuery: raw.splQuery ?? undefined,
+    splThreshold: raw.splThreshold ?? undefined,
+    scheduleInterval: raw.scheduleInterval ?? undefined,
   };
 }
 
@@ -300,10 +306,10 @@ export const ingestApi = {
     rawData?: unknown;
   }) => apiClient.post<{ logId: string }>("/ingest-log", data),
 
-  bulk: (logs: Record<string, unknown>[]) =>
-    apiClient.post<{ inserted: number }>("/ingest/bulk", { logs }),
+  bulk: (logs: Record<string, unknown>[], sourcetype?: string) =>
+    apiClient.post<{ inserted: number }>("/ingest/bulk", { logs, sourcetype }),
 
-  raw: (text: string, params?: { source?: string; hostname?: string }) =>
+  raw: (text: string, params?: { source?: string; hostname?: string; sourcetype?: string }) =>
     apiClient.post<{ inserted: number; source: string }>("/ingest/raw", { text }, { params }),
 
   stats: () =>
