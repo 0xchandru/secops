@@ -77,7 +77,7 @@ export async function toggleRule(req: Request, res: Response): Promise<void> {
     return;
   }
   const id = req.params.id as string;
-  const rule = await rulesService.toggleRule(id, enabled);
+  const rule = await rulesService.toggleRule(id, enabled, req.user!.userId);
   if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
   invalidateEngine();
   await logAuditEvent(req, "rules.toggle", { resource: "rules", resourceId: id, metadata: { enabled } });
@@ -101,34 +101,52 @@ export async function testRule(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Run the loaded rule against these events
-  await detectionEngine.loadRulesFromDb();
-  const matches: any[] = [];
-  for (const log of recentLogs) {
-    const msgStr = log.message ?? JSON.stringify(log.rawData ?? {});
-    const detected = await detectionEngine.testSingleEvent({
-      id: log.id,
-      message: msgStr,
-      source: log.source,
-      severity: log.severity,
-      sourceIp: log.sourceIp ?? "",
-      destIp: log.destIp ?? "",
-      hostname: log.hostname ?? "",
-      username: log.username ?? "",
-      category: log.category ?? "",
-      action: log.action ?? "",
-      processName: log.processName ?? "",
-      processCommandLine: log.processCommandLine ?? "",
-      eventType: log.eventType ?? "",
-      httpUrl: log.httpUrl ?? "",
-      registryKey: log.registryKey ?? "",
-      rawData: log.rawData,
-    }, rule.id);
-    if (detected) matches.push({ logId: log.id, message: msgStr, source: log.source, severity: log.severity });
-    if (matches.length >= 5) break;
-  }
+  // Build NormalizedEvent objects for the test
+  const normalizedEvents = recentLogs.map(log => ({
+    id: log.id,
+    timestamp: log.createdAt,
+    parsedTimestamp: log.parsedTimestamp ?? undefined,
+    sourceType: log.sourcetype ?? log.source ?? "generic",
+    sourceHost: log.hostname ?? log.source ?? "",
+    category: log.category ?? "",
+    action: log.action ?? "",
+    outcome: log.outcome ?? undefined,
+    severity: log.severity,
+    eventType: log.eventType ?? undefined,
+    message: log.message ?? JSON.stringify(log.rawData ?? {}),
+    userName: log.username ?? undefined,
+    targetUserName: log.targetUsername ?? undefined,
+    srcIp: log.sourceIp ?? undefined,
+    dstIp: log.destIp ?? undefined,
+    srcPort: log.srcPort ?? undefined,
+    dstPort: log.dstPort ?? undefined,
+    protocol: log.protocol ?? undefined,
+    processName: log.processName ?? undefined,
+    processId: log.processId ?? undefined,
+    processCommandLine: log.processCommandLine ?? undefined,
+    httpMethod: log.httpMethod ?? undefined,
+    httpUrl: log.httpUrl ?? undefined,
+    httpStatusCode: log.httpStatusCode ?? undefined,
+    registryKey: log.registryKey ?? undefined,
+    registryValue: log.registryValue ?? undefined,
+    fileName: log.fileName ?? undefined,
+    filePath: log.filePath ?? undefined,
+    fileHash: log.fileHash ?? undefined,
+    rawData: log.rawData ?? undefined,
+  }));
 
-  res.json({ matchCount: matches.length, sampleMatches: matches.slice(0, 5) });
+  const yamlContent = rule.yamlContent ?? "";
+  const triggered = yamlContent
+    ? detectionEngine.testRule(yamlContent, normalizedEvents as any)
+    : [];
+  const matches = triggered.slice(0, 5).map(t => ({
+    logId: t.triggerEventId,
+    message: t.description,
+    source: t.sourceHost,
+    severity: t.severity,
+  }));
+
+  res.json({ matchCount: triggered.length, sampleMatches: matches });
 }
 
 export async function getRuleStats(req: Request, res: Response): Promise<void> {

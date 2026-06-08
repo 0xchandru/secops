@@ -357,17 +357,41 @@ export default function LogsExplorerPage() {
   });
   const facets = facetData?.facets ?? {};
 
+  // Detect whether the current search uses SPL pipes — if so, route to /logs/spl
+  const hasSplPipes = useMemo(() => {
+    const q = effectiveSearch.trim();
+    return q.includes('|') && q.length >= 3;
+  }, [effectiveSearch]);
+
   const queryParams = useMemo(() => {
     const p: Record<string, string | number> = { page, limit: PAGE_SIZE };
-    if (effectiveSearch.length >= 2) p.q = effectiveSearch;
+    if (!hasSplPipes && effectiveSearch.length >= 2) p.q = effectiveSearch;
     if (timeRange) p.from = timeRange;
     return p;
-  }, [page, effectiveSearch, timeRange]);
+  }, [page, effectiveSearch, timeRange, hasSplPipes]);
 
-  const { data, isLoading, isFetching, refetch } = useQuery({
+  const splParams = useMemo(() => ({
+    query: effectiveSearch,
+    from: timeRange || undefined,
+    limit: PAGE_SIZE,
+  }), [effectiveSearch, timeRange]);
+
+  const { data: splData, isLoading: splLoading, isFetching: splFetching, refetch: splRefetch } = useQuery({
+    queryKey: ['logs-spl', splParams],
+    queryFn: () => logsApi.spl(splParams).then(r => r.data),
+    enabled: hasSplPipes,
+  });
+
+  const { data: regularData, isLoading: regularLoading, isFetching: regularFetching, refetch: regularRefetch } = useQuery({
     queryKey: ['logs', queryParams],
     queryFn: () => logsApi.list(queryParams).then(r => r.data),
+    enabled: !hasSplPipes,
   });
+
+  const data = hasSplPipes ? splData : regularData;
+  const isLoading = hasSplPipes ? splLoading : regularLoading;
+  const isFetching = hasSplPipes ? splFetching : regularFetching;
+  const refetch = hasSplPipes ? splRefetch : regularRefetch;
 
   const logs = useMemo(() => (data?.logs ?? []).map(normalizeLog), [data]);
 
@@ -470,7 +494,13 @@ export default function LogsExplorerPage() {
               </h1>
               <p className="text-muted-foreground mt-1 text-sm flex items-center gap-2">
                 Search and investigate raw security events
-                {data && <span className="font-mono text-xs text-primary">{data.total.toLocaleString()} total events</span>}
+                {hasSplPipes ? (
+                  <span className="flex items-center gap-1.5 font-mono text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                    <Terminal className="w-3 h-3" /> SPL — {data?.total.toLocaleString() ?? '…'} result{data?.total !== 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  data && <span className="font-mono text-xs text-primary">{data.total.toLocaleString()} total events</span>
+                )}
                 {isFetching && !isLoading && (
                   <span className="flex items-center gap-1 text-primary text-xs">
                     <RefreshCw className="w-3 h-3 animate-spin" /> Syncing

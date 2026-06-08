@@ -23,6 +23,10 @@ export async function createRule(data: {
   mitreTactic?: string;
   tags?: string[];
   createdBy?: string;
+  ruleType?: string;
+  splQuery?: string | null;
+  splThreshold?: number;
+  scheduleInterval?: string;
 }) {
   const [rule] = await db.insert(rulesTable).values({
     ...data,
@@ -40,6 +44,10 @@ export async function updateRule(id: string, data: {
   yamlContent?: string;
   mitreIds?: string[];
   updatedBy?: string;
+  ruleType?: string;
+  splQuery?: string | null;
+  splThreshold?: number;
+  scheduleInterval?: string;
 }) {
   const [rule] = await db.update(rulesTable)
     .set({ ...data, updatedAt: new Date(), lastModifiedAt: new Date() })

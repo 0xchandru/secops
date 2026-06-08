@@ -158,7 +158,6 @@ function parseWindowsEventXml(raw: string, sourceHost: string): ParsedEvent | nu
     message: messageParts.join(" · "),
     rawLog: raw,
     eventType: `windows_${eventId}`,
-    hostname: computer,
     userName: eventData["SubjectUserName"] && eventData["SubjectUserName"] !== "-" ? eventData["SubjectUserName"] : undefined,
     targetUserName: eventData["TargetUserName"] && eventData["TargetUserName"] !== "-" ? eventData["TargetUserName"] : undefined,
     userDomain: eventData["TargetDomainName"] ?? eventData["SubjectDomainName"],
@@ -173,7 +172,6 @@ function parseWindowsEventXml(raw: string, sourceHost: string): ParsedEvent | nu
     vendorName: "Microsoft",
     vendorProduct: provider,
     deviceEventClassId: String(eventId),
-    additionalFields: eventData,
   };
 }
 
@@ -197,7 +195,6 @@ function parseGenericXml(raw: string, sourceHost: string): ParsedEvent | null {
     message,
     rawLog: raw,
     eventType: tags["eventtype"] ?? tags["type"] ?? "xml",
-    hostname: tags["hostname"] ?? tags["host"] ?? tags["computer"],
     userName: tags["username"] ?? tags["user"],
     srcIp: tags["sourceaddress"] ?? tags["srcip"] ?? tags["sourceip"] ?? tags["src"],
     dstIp: tags["destinationaddress"] ?? tags["dstip"] ?? tags["destip"] ?? tags["dst"],

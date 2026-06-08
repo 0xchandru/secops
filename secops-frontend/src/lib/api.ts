@@ -280,6 +280,8 @@ export const logsApi = {
     apiClient.get<{ sources: string[]; severities: string[]; categories: string[] }>("/logs/filters"),
   facets: (body: { fields?: string[]; limit?: number; from?: string; q?: string }) =>
     apiClient.post<{ facets: Record<string, { value: string; count: number }[]> }>("/logs/facets", body),
+  spl: (body: { query: string; from?: string; to?: string; limit?: number }) =>
+    apiClient.post<{ logs: any[]; total: number; isSplResult: true; columns?: string[] }>("/logs/spl", body),
 };
 
 // ─── Events ──────────────────────────────────────────────────────────────────

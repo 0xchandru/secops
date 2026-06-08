@@ -53,8 +53,42 @@ export function executeSplPipes(rows: SplRow[], pipeString: string): SplRow[] {
   return result;
 }
 
+// Splunk-standard field name aliases → internal DB column names
+const SPLUNK_FIELD_ALIASES: Record<string, string[]> = {
+  _time:      ["parsedTimestamp", "parsed_timestamp", "createdAt", "created_at", "timestamp"],
+  _raw:       ["rawData", "raw_data", "rawLog", "raw_log", "message"],
+  _indextime: ["createdAt", "created_at"],
+  host:       ["hostname", "sourceHost", "source_host"],
+  source:     ["source", "sourceName"],
+  sourcetype: ["sourcetype", "sourceType", "source_type"],
+  index:      ["indexName", "index_name"],
+  eventtype:  ["eventType", "event_type"],
+  linecount:  ["linecount"],
+  src:        ["sourceIp", "source_ip", "srcIp", "src_ip"],
+  src_ip:     ["sourceIp", "source_ip", "srcIp"],
+  dst:        ["destIp", "dest_ip", "dstIp", "dst_ip"],
+  dst_ip:     ["destIp", "dest_ip", "dstIp"],
+  src_port:   ["srcPort", "src_port", "sourcePort"],
+  dst_port:   ["dstPort", "dst_port", "destPort"],
+  user:       ["username", "userName", "user_name"],
+  username:   ["username", "userName", "user_name"],
+  process:    ["processName", "process_name"],
+  pid:        ["processId", "process_id"],
+  action:     ["action", "deviceAction", "device_action"],
+  category:   ["category"],
+  severity:   ["severity"],
+  message:    ["message"],
+};
+
 function getVal(row: SplRow, field: string): unknown {
   if (field in row) return row[field];
+  // Try Splunk standard aliases first
+  const aliases = SPLUNK_FIELD_ALIASES[field.toLowerCase()];
+  if (aliases) {
+    for (const alias of aliases) {
+      if (alias in row) return row[alias];
+    }
+  }
   // Try camelCase → snake_case variants
   const snake = field.replace(/([A-Z])/g, "_$1").toLowerCase();
   if (snake in row) return row[snake];
