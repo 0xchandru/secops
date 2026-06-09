@@ -11,7 +11,8 @@ import {
   ChevronsRight, SlidersHorizontal, Loader2, Database, Radio, BarChart3, Shield, Globe,
   Tag, CalendarDays, Columns, Download, RefreshCw, AlertTriangle, Activity, Zap,
   Copy, Check, Clock, Save, History, ChevronRight as ChevronR, PanelLeftClose, PanelLeft,
-  Hash, Terminal, Bookmark, Trash2, Play, Bell, Filter, Code2, Cpu
+  Hash, Terminal, Bookmark, Trash2, Play, Bell, Filter, Code2, Cpu,
+  Mail, MessageSquare,
 } from 'lucide-react';
 import { rulesApi } from '@/lib/api';
 import type { LogEntry } from '@/lib/types';
@@ -34,14 +35,49 @@ const SEVERITY_COLORS: Record<string, { bar: string; bg: string; text: string; d
 };
 
 const TIME_RANGES: { value: string; label: string }[] = [
-  { value: '', label: 'All Time' },
-  { value: '15m', label: '15 min' },
-  { value: '1h', label: '1 hour' },
-  { value: '6h', label: '6 hours' },
-  { value: '24h', label: '24 hours' },
-  { value: '7d', label: '7 days' },
-  { value: '30d', label: '30 days' },
+  { value: '', label: 'All time' },
+  { value: '5m', label: 'Last 5 minutes' },
+  { value: '15m', label: 'Last 15 minutes' },
+  { value: '30m', label: 'Last 30 minutes' },
+  { value: '1h', label: 'Last 60 minutes' },
+  { value: '4h', label: 'Last 4 hours' },
+  { value: '8h', label: 'Last 8 hours' },
+  { value: '24h', label: 'Last 24 hours' },
+  { value: '2d', label: 'Last 2 days' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: '90d', label: 'Last 90 days' },
 ];
+
+const TIME_PRESET_GROUPS = [
+  {
+    group: 'Real-time',
+    items: [
+      { value: '5m', label: 'Last 5 minutes' },
+      { value: '15m', label: 'Last 15 minutes' },
+      { value: '30m', label: 'Last 30 minutes' },
+      { value: '1h', label: 'Last 60 minutes' },
+    ],
+  },
+  {
+    group: 'Relative',
+    items: [
+      { value: '4h', label: 'Last 4 hours' },
+      { value: '8h', label: 'Last 8 hours' },
+      { value: '24h', label: 'Last 24 hours' },
+      { value: '2d', label: 'Last 2 days' },
+      { value: '7d', label: 'Last 7 days' },
+      { value: '30d', label: 'Last 30 days' },
+      { value: '90d', label: 'Last 90 days' },
+    ],
+  },
+  {
+    group: 'Other',
+    items: [
+      { value: '', label: 'All time' },
+    ],
+  },
+] as const;
 
 type ColumnKey = 'timestamp' | 'source' | 'severity' | 'category' | 'eventType' | 'sourceIp' | 'destIp' | 'riskScore' | 'message';
 const ALL_COLUMNS: { key: ColumnKey; label: string; sortable: boolean }[] = [
@@ -115,6 +151,95 @@ const DETAIL_FIELD_TO_FILTER: Record<string, string> = {
 };
 
 interface SavedSearch { id: string; name: string; query: string; timeRange: string; createdAt: string; }
+
+// ── Splunk-style Time Picker ──────────────────────────────────────────────
+function SplunkTimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const currentLabel = TIME_RANGES.find(r => r.value === value)?.label ?? 'All time';
+
+  return (
+    <div ref={ref} className="relative">
+      {/* Trigger button — Splunk-style pill with calendar icon */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border text-sm font-medium transition-all ${
+          open
+            ? 'bg-primary/10 border-primary/40 text-primary'
+            : 'bg-transparent border-border text-muted-foreground hover:text-foreground hover:border-border/80 hover:bg-secondary/40'
+        }`}
+      >
+        <CalendarDays className="w-4 h-4 shrink-0" />
+        <span className="whitespace-nowrap max-w-36 truncate">{currentLabel}</span>
+        <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 z-40 bg-card border border-border rounded-xl shadow-2xl shadow-black/40 w-72 overflow-hidden">
+          {/* Header */}
+          <div className="px-4 py-2.5 border-b border-border bg-secondary/20 flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              <Clock className="w-3 h-3" /> Time Range
+            </span>
+            {value && (
+              <button onClick={() => { onChange(''); setOpen(false); }} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Preset groups */}
+          <div className="p-2">
+            {TIME_PRESET_GROUPS.map((group) => (
+              <div key={group.group} className="mb-1">
+                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                  {group.group}
+                </p>
+                <div className="grid grid-cols-2 gap-0.5">
+                  {group.items.map((item) => {
+                    const isSelected = item.value === value;
+                    return (
+                      <button
+                        key={item.value}
+                        onClick={() => { onChange(item.value); setOpen(false); }}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm transition-all ${
+                          isSelected
+                            ? 'bg-primary/15 text-primary border border-primary/25'
+                            : 'text-foreground hover:bg-secondary/60 border border-transparent'
+                        }`}
+                      >
+                        {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+                        <span className="text-xs font-medium truncate">{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Current selection footer */}
+          <div className="px-4 py-2.5 border-t border-border/50 bg-secondary/10">
+            <p className="text-[10px] text-muted-foreground">
+              <span className="font-semibold text-foreground">{currentLabel}</span>
+              {value && <span className="ml-1">· updated on search</span>}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function loadColumns(): ColumnKey[] {
   try {
@@ -197,6 +322,12 @@ export default function LogsExplorerPage() {
   const [saveAlertLoading, setSaveAlertLoading] = useState(false);
   const [saveAlertError, setSaveAlertError] = useState<string | null>(null);
   const [saveAlertSuccess, setSaveAlertSuccess] = useState(false);
+  const [saveAlertTriggerMode, setSaveAlertTriggerMode] = useState<'scheduled' | 'per_result'>('scheduled');
+  const [saveAlertSuppressWindow, setSaveAlertSuppressWindow] = useState(0);
+  const [saveAlertNotifyEmail, setSaveAlertNotifyEmail] = useState(false);
+  const [saveAlertNotifySlack, setSaveAlertNotifySlack] = useState(false);
+  const [saveAlertMitreTactic, setSaveAlertMitreTactic] = useState('');
+  const [saveAlertDialogSection, setSaveAlertDialogSection] = useState<'settings' | 'trigger' | 'actions'>('settings');
 
   const { events: liveEvents, isConnected: liveConnected, clear: clearLive } = useEventStream();
 
@@ -271,15 +402,27 @@ export default function LogsExplorerPage() {
     setSaveAlertError(null);
     setSaveAlertSuccess(false);
     try {
+      const notifyParts: string[] = [];
+      if (saveAlertNotifyEmail) notifyParts.push('email');
+      if (saveAlertNotifySlack) notifyParts.push('slack');
+      const descParts = [
+        saveAlertDesc.trim() || `SPL Alert: ${searchTerm.trim().slice(0, 200)}`,
+        `Type: ${saveAlertTriggerMode === 'per_result' ? 'per-result' : 'scheduled'}`,
+        saveAlertSuppressWindow > 0 ? `Suppress: ${saveAlertSuppressWindow}m` : '',
+        notifyParts.length > 0 ? `Notify: ${notifyParts.join(', ')}` : '',
+        saveAlertMitreTactic ? `MITRE: ${saveAlertMitreTactic}` : '',
+      ].filter(Boolean).join(' | ');
+
       await rulesApi.create({
         name: saveAlertName.trim(),
-        description: saveAlertDesc.trim() || `SPL Alert: ${searchTerm.trim().slice(0, 200)}`,
+        description: descParts,
         severity: saveAlertSeverity,
         ruleType: 'spl_saved_search',
         splQuery: searchTerm.trim(),
         splThreshold: saveAlertThreshold,
-        scheduleInterval: saveAlertInterval,
+        scheduleInterval: saveAlertTriggerMode === 'per_result' ? '1m' : saveAlertInterval,
         enabled: true,
+        ...(saveAlertMitreTactic ? { mitreTactic: saveAlertMitreTactic.split(',')[0].trim() } : {}),
       });
       setSaveAlertSuccess(true);
       setTimeout(() => {
@@ -287,13 +430,18 @@ export default function LogsExplorerPage() {
         setSaveAlertName('');
         setSaveAlertDesc('');
         setSaveAlertSuccess(false);
-      }, 1500);
+        setSaveAlertDialogSection('settings');
+      }, 1800);
     } catch (err: any) {
       setSaveAlertError(err?.response?.data?.error ?? 'Failed to save alert');
     } finally {
       setSaveAlertLoading(false);
     }
-  }, [saveAlertName, saveAlertDesc, searchTerm, saveAlertSeverity, saveAlertThreshold, saveAlertInterval]);
+  }, [
+    saveAlertName, saveAlertDesc, searchTerm, saveAlertSeverity, saveAlertThreshold,
+    saveAlertInterval, saveAlertTriggerMode, saveAlertSuppressWindow,
+    saveAlertNotifyEmail, saveAlertNotifySlack, saveAlertMitreTactic,
+  ]);
 
   const addFieldFilter = useCallback((field: string, value: string, negate = false) => {
     setActiveFieldFilters(prev => {
@@ -579,7 +727,13 @@ export default function LogsExplorerPage() {
                       className="p-1.5 text-muted-foreground hover:text-primary rounded-lg hover:bg-primary/10 transition-colors">
                       <Bookmark className="w-3.5 h-3.5" />
                     </button>
-                    <button onClick={() => { setSaveAlertName(''); setSaveAlertDesc(''); setSaveAlertError(null); setSaveAlertSuccess(false); setShowSaveAlertDialog(true); }}
+                    <button onClick={() => {
+                      setSaveAlertName(''); setSaveAlertDesc(''); setSaveAlertError(null);
+                      setSaveAlertSuccess(false); setSaveAlertTriggerMode('scheduled');
+                      setSaveAlertSuppressWindow(0); setSaveAlertNotifyEmail(false);
+                      setSaveAlertNotifySlack(false); setSaveAlertMitreTactic('');
+                      setSaveAlertDialogSection('settings'); setShowSaveAlertDialog(true);
+                    }}
                       title="Save as Alert (SPL saved search)"
                       className="p-1.5 text-muted-foreground hover:text-amber-400 rounded-lg hover:bg-amber-400/10 transition-colors">
                       <Bell className="w-3.5 h-3.5" />
@@ -593,12 +747,8 @@ export default function LogsExplorerPage() {
                 </button>
               </div>
             </div>
-            <div className="border-l border-border flex items-center px-3 gap-2 shrink-0">
-              <CalendarDays className="w-4 h-4 text-muted-foreground" />
-              <select value={timeRange} onChange={e => { setTimeRange(e.target.value); setPage(1); }} aria-label="Time range"
-                className="bg-transparent text-sm text-foreground focus:outline-none appearance-none cursor-pointer pr-4">
-                {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
+            <div className="border-l border-border flex items-center px-3 shrink-0">
+              <SplunkTimePicker value={timeRange} onChange={(v) => { setTimeRange(v); setPage(1); }} />
             </div>
           </div>
 
@@ -1394,114 +1544,346 @@ export default function LogsExplorerPage() {
         </>
       )}
 
-      {/* ── Save as Alert Modal ─────────────────────────────────────────── */}
+      {/* ── Save as Alert Modal — Splunk-style ─────────────────────────── */}
       {showSaveAlertDialog && (
         <>
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setShowSaveAlertDialog(false)} />
-          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg mx-4 pointer-events-auto overflow-hidden">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => setShowSaveAlertDialog(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl shadow-black/60 w-full max-w-2xl pointer-events-auto overflow-hidden flex flex-col max-h-[90vh]">
+
               {/* Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-secondary/20">
-                <div className="flex items-center gap-2.5">
-                  <Bell className="w-5 h-5 text-amber-400" />
-                  <h2 className="font-semibold text-foreground">Save as Alert</h2>
-                  <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded">SPL SAVED SEARCH</span>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-secondary/20 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                    <Bell className="w-4.5 h-4.5 text-amber-400" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-foreground text-base">Save as Alert</h2>
+                    <p className="text-xs text-muted-foreground">Create a detection rule from this SPL search</p>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded ml-1">SPL SAVED SEARCH</span>
                 </div>
-                <button onClick={() => setShowSaveAlertDialog(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => setShowSaveAlertDialog(false)} className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="p-6 space-y-4">
-                {/* SPL preview */}
-                <div className="bg-black/30 border border-border/50 rounded-xl px-4 py-3">
-                  <div className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider mb-1.5 flex items-center gap-1.5">
-                    <Terminal className="w-3 h-3" /> Search Query
-                  </div>
-                  <p className="text-xs font-mono text-primary/90 break-all leading-relaxed line-clamp-3">{searchTerm}</p>
-                </div>
+              {/* Section tabs */}
+              <div className="flex border-b border-border shrink-0 bg-secondary/10">
+                {(['settings', 'trigger', 'actions'] as const).map((section) => (
+                  <button
+                    key={section}
+                    onClick={() => setSaveAlertDialogSection(section)}
+                    className={`px-5 py-3 text-xs font-semibold uppercase tracking-wider transition-all border-b-2 -mb-px ${
+                      saveAlertDialogSection === section
+                        ? 'border-amber-400 text-amber-400'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {section === 'settings' ? '1. Settings' : section === 'trigger' ? '2. Trigger' : '3. Actions'}
+                  </button>
+                ))}
+              </div>
 
-                {/* Alert name */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Alert Name *</label>
-                  <input
-                    autoFocus
-                    value={saveAlertName}
-                    onChange={e => setSaveAlertName(e.target.value)}
-                    placeholder="e.g., High severity brute force detection"
-                    className="w-full bg-input border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                  />
-                </div>
+              <div className="flex-1 overflow-y-auto">
+                {/* ── 1. Settings ── */}
+                {saveAlertDialogSection === 'settings' && (
+                  <div className="p-6 space-y-5">
+                    {/* SPL preview */}
+                    <div className="bg-[#050810] border border-border/50 rounded-xl px-4 py-3">
+                      <div className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider mb-1.5 flex items-center gap-1.5">
+                        <Terminal className="w-3 h-3" /> SPL Search Query
+                      </div>
+                      <p className="text-xs font-mono text-primary/90 break-all leading-relaxed line-clamp-4">{searchTerm}</p>
+                    </div>
 
-                {/* Description */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Description</label>
-                  <input
-                    value={saveAlertDesc}
-                    onChange={e => setSaveAlertDesc(e.target.value)}
-                    placeholder="Optional description..."
-                    className="w-full bg-input border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                  />
-                </div>
+                    {/* Alert name */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Alert Name *</label>
+                      <input
+                        autoFocus
+                        value={saveAlertName}
+                        onChange={e => setSaveAlertName(e.target.value)}
+                        placeholder="e.g., High-Severity Brute Force Detection"
+                        className="w-full bg-input border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-all"
+                      />
+                    </div>
 
-                {/* Severity + Schedule + Threshold row */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Severity</label>
-                    <select value={saveAlertSeverity} onChange={e => setSaveAlertSeverity(e.target.value)}
-                      className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer">
-                      <option value="critical">Critical</option>
-                      <option value="high">High</option>
-                      <option value="medium">Medium</option>
-                      <option value="low">Low</option>
-                      <option value="info">Info</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Schedule</label>
-                    <select value={saveAlertInterval} onChange={e => setSaveAlertInterval(e.target.value)}
-                      className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors appearance-none cursor-pointer">
-                      {SCHEDULE_INTERVALS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Threshold</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={saveAlertThreshold}
-                      onChange={e => setSaveAlertThreshold(Math.max(1, Number(e.target.value)))}
-                      className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary transition-colors"
-                    />
-                  </div>
-                </div>
+                    {/* Description */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Description</label>
+                      <textarea
+                        value={saveAlertDesc}
+                        onChange={e => setSaveAlertDesc(e.target.value)}
+                        rows={2}
+                        placeholder="Describe what this alert detects and why it matters..."
+                        className="w-full bg-input border border-border rounded-xl px-4 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-all resize-none"
+                      />
+                    </div>
 
-                {saveAlertError && (
-                  <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3">
-                    <AlertTriangle className="w-4 h-4 shrink-0" />
-                    {saveAlertError}
+                    {/* Severity + Type */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Severity</label>
+                        <select value={saveAlertSeverity} onChange={e => setSaveAlertSeverity(e.target.value)}
+                          className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary/60 transition-all appearance-none cursor-pointer">
+                          <option value="critical">🔴 Critical</option>
+                          <option value="high">🟠 High</option>
+                          <option value="medium">🟡 Medium</option>
+                          <option value="low">🟢 Low</option>
+                          <option value="info">🔵 Info</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">MITRE Tactic</label>
+                        <input
+                          value={saveAlertMitreTactic}
+                          onChange={e => setSaveAlertMitreTactic(e.target.value)}
+                          placeholder="e.g., TA0006, Credential Access"
+                          className="w-full bg-input border border-border rounded-xl px-3 py-2.5 text-sm text-foreground focus:outline-none focus:border-primary/60 transition-all"
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                {saveAlertSuccess && (
-                  <div className="flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
-                    <Check className="w-4 h-4 shrink-0" />
-                    Alert saved successfully! Rule will run on schedule.
+                {/* ── 2. Trigger ── */}
+                {saveAlertDialogSection === 'trigger' && (
+                  <div className="p-6 space-y-6">
+                    {/* Alert Type */}
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Alert Type</label>
+                      <div className="grid grid-cols-2 gap-3">
+                        {([
+                          { id: 'scheduled', icon: Clock, title: 'Scheduled', desc: 'Run search on a cron schedule and alert on matches' },
+                          { id: 'per_result', icon: Zap, title: 'Per Result', desc: 'Alert immediately when a new event matches the query' },
+                        ] as const).map(({ id, icon: Icon, title, desc }) => (
+                          <button
+                            key={id}
+                            onClick={() => setSaveAlertTriggerMode(id)}
+                            className={`flex flex-col items-start gap-2 p-4 rounded-xl border-2 transition-all text-left ${
+                              saveAlertTriggerMode === id
+                                ? 'border-amber-500/50 bg-amber-500/5 text-foreground'
+                                : 'border-border bg-secondary/20 text-muted-foreground hover:border-border/80 hover:text-foreground'
+                            }`}
+                          >
+                            <Icon className={`w-5 h-5 ${saveAlertTriggerMode === id ? 'text-amber-400' : ''}`} />
+                            <div>
+                              <p className="text-sm font-semibold">{title}</p>
+                              <p className="text-xs mt-0.5 leading-relaxed">{desc}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Schedule (only for scheduled mode) */}
+                    {saveAlertTriggerMode === 'scheduled' && (
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Run every</label>
+                        <div className="flex gap-2">
+                          {SCHEDULE_INTERVALS.map(s => (
+                            <button
+                              key={s.value}
+                              onClick={() => setSaveAlertInterval(s.value)}
+                              className={`flex-1 py-2 rounded-lg border text-xs font-medium transition-all ${
+                                saveAlertInterval === s.value
+                                  ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
+                                  : 'border-border bg-secondary/20 text-muted-foreground hover:text-foreground hover:border-border/80'
+                              }`}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Trigger Condition */}
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Trigger Condition</label>
+                      <div className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3">
+                        <p className="text-xs text-muted-foreground">Alert when the number of results is:</p>
+                        <div className="flex items-center gap-3">
+                          <select className="bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none appearance-none">
+                            <option>greater than</option>
+                            <option>less than</option>
+                            <option>equal to</option>
+                          </select>
+                          <input
+                            type="number"
+                            min={0}
+                            value={saveAlertThreshold}
+                            onChange={e => setSaveAlertThreshold(Math.max(0, Number(e.target.value)))}
+                            className="w-24 bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary/60 transition-all"
+                          />
+                          <span className="text-sm text-muted-foreground">results</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Suppression */}
+                    <div className="space-y-3">
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Throttle (Suppression)</label>
+                      <div className="bg-secondary/20 border border-border rounded-xl p-4">
+                        <p className="text-xs text-muted-foreground mb-3">Suppress repeated triggers for:</p>
+                        <div className="flex items-center gap-3">
+                          {[
+                            { v: 0, l: 'Off' }, { v: 5, l: '5 min' }, { v: 15, l: '15 min' },
+                            { v: 60, l: '1 hour' }, { v: 240, l: '4 hours' }, { v: 1440, l: '1 day' },
+                          ].map(({ v, l }) => (
+                            <button
+                              key={v}
+                              onClick={() => setSaveAlertSuppressWindow(v)}
+                              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                                saveAlertSuppressWindow === v
+                                  ? 'border-primary/50 bg-primary/10 text-primary'
+                                  : 'border-border bg-transparent text-muted-foreground hover:text-foreground hover:border-border/80'
+                              }`}
+                            >
+                              {l}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 3. Actions ── */}
+                {saveAlertDialogSection === 'actions' && (
+                  <div className="p-6 space-y-4">
+                    <p className="text-xs text-muted-foreground">Configure what happens when this alert fires.</p>
+
+                    {/* Always on: Triggered Alerts */}
+                    <div className="flex items-start gap-4 p-4 rounded-xl border border-border bg-secondary/20">
+                      <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                        <Bell className="w-4 h-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground">Triggered Alerts</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Added to Alert Queue with assigned severity. Always enabled.</p>
+                      </div>
+                      <div className="w-5 h-5 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 mt-0.5">
+                        <Check className="w-3 h-3 text-primary" />
+                      </div>
+                    </div>
+
+                    {/* Email notification */}
+                    <button
+                      onClick={() => setSaveAlertNotifyEmail(v => !v)}
+                      className={`w-full flex items-start gap-4 p-4 rounded-xl border-2 transition-all text-left ${
+                        saveAlertNotifyEmail ? 'border-primary/40 bg-primary/5' : 'border-border bg-secondary/20 hover:border-border/80'
+                      }`}
+                    >
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${saveAlertNotifyEmail ? 'bg-primary/15 border border-primary/30' : 'bg-secondary border border-border'}`}>
+                        <Mail className={`w-4 h-4 ${saveAlertNotifyEmail ? 'text-primary' : 'text-muted-foreground'}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-semibold ${saveAlertNotifyEmail ? 'text-primary' : 'text-foreground'}`}>Email Notification</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Send email to configured recipients via Settings → Integrations.</p>
+                      </div>
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                        saveAlertNotifyEmail ? 'bg-primary border-primary' : 'border-border bg-transparent'
+                      }`}>
+                        {saveAlertNotifyEmail && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                    </button>
+
+                    {/* Slack notification */}
+                    <button
+                      onClick={() => setSaveAlertNotifySlack(v => !v)}
+                      className={`w-full flex items-start gap-4 p-4 rounded-xl border-2 transition-all text-left ${
+                        saveAlertNotifySlack ? 'border-primary/40 bg-primary/5' : 'border-border bg-secondary/20 hover:border-border/80'
+                      }`}
+                    >
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${saveAlertNotifySlack ? 'bg-primary/15 border border-primary/30' : 'bg-secondary border border-border'}`}>
+                        <MessageSquare className={`w-4 h-4 ${saveAlertNotifySlack ? 'text-primary' : 'text-muted-foreground'}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-semibold ${saveAlertNotifySlack ? 'text-primary' : 'text-foreground'}`}>Slack / Webhook</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Post to Slack channel or webhook URL via Settings → Integrations.</p>
+                      </div>
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                        saveAlertNotifySlack ? 'bg-primary border-primary' : 'border-border bg-transparent'
+                      }`}>
+                        {saveAlertNotifySlack && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                    </button>
+
+                    {/* Summary */}
+                    <div className="bg-secondary/30 border border-border rounded-xl p-4 space-y-2">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Configuration Summary</p>
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Name</span><span className="text-foreground font-medium truncate ml-2">{saveAlertName || '—'}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Severity</span><span className="text-foreground font-medium capitalize">{saveAlertSeverity}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Type</span><span className="text-foreground font-medium capitalize">{saveAlertTriggerMode.replace('_', ' ')}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Schedule</span><span className="text-foreground font-medium">{SCHEDULE_INTERVALS.find(s => s.value === saveAlertInterval)?.label ?? saveAlertInterval}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Threshold</span><span className="text-foreground font-medium">&gt; {saveAlertThreshold} results</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Suppress</span><span className="text-foreground font-medium">{saveAlertSuppressWindow === 0 ? 'Off' : `${saveAlertSuppressWindow}m`}</span></div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
 
+              {/* Error / Success */}
+              {(saveAlertError || saveAlertSuccess) && (
+                <div className="px-6 py-3 border-t border-border shrink-0">
+                  {saveAlertError && (
+                    <div className="flex items-center gap-2 text-destructive text-sm bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-3">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      {saveAlertError}
+                    </div>
+                  )}
+                  {saveAlertSuccess && (
+                    <div className="flex items-center gap-2 text-emerald-400 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                      <Check className="w-4 h-4 shrink-0" />
+                      Alert rule created! It will run on schedule and appear in Alert Queue when triggered.
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Footer */}
-              <div className="px-6 py-4 border-t border-border bg-secondary/10 flex items-center justify-end gap-3">
-                <button onClick={() => setShowSaveAlertDialog(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
-                <button
-                  onClick={saveSplAsAlert}
-                  disabled={!saveAlertName.trim() || saveAlertLoading || saveAlertSuccess}
-                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-semibold text-sm rounded-xl transition-colors flex items-center gap-2"
-                >
-                  {saveAlertLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
-                  {saveAlertLoading ? 'Saving…' : 'Create Alert'}
-                </button>
+              <div className="px-6 py-4 border-t border-border bg-secondary/10 flex items-center justify-between shrink-0">
+                <div className="flex gap-1">
+                  {(['settings', 'trigger', 'actions'] as const).map((s, i) => (
+                    <button key={s} onClick={() => setSaveAlertDialogSection(s)}
+                      className={`w-2 h-2 rounded-full transition-all ${saveAlertDialogSection === s ? 'bg-amber-400' : 'bg-border hover:bg-muted-foreground'}`}
+                      title={['Settings', 'Trigger', 'Actions'][i]}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  {saveAlertDialogSection !== 'settings' && (
+                    <button
+                      onClick={() => setSaveAlertDialogSection(s => s === 'actions' ? 'trigger' : 'settings')}
+                      className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      ← Back
+                    </button>
+                  )}
+                  <button onClick={() => setShowSaveAlertDialog(false)} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+                  {saveAlertDialogSection !== 'actions' ? (
+                    <button
+                      disabled={saveAlertDialogSection === 'settings' && !saveAlertName.trim()}
+                      onClick={() => setSaveAlertDialogSection(s => s === 'settings' ? 'trigger' : 'actions')}
+                      className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-semibold text-sm rounded-xl transition-colors"
+                    >
+                      Next →
+                    </button>
+                  ) : (
+                    <button
+                      onClick={saveSplAsAlert}
+                      disabled={!saveAlertName.trim() || saveAlertLoading || saveAlertSuccess}
+                      className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-semibold text-sm rounded-xl transition-colors flex items-center gap-2"
+                    >
+                      {saveAlertLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
+                      {saveAlertLoading ? 'Creating…' : 'Create Alert'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

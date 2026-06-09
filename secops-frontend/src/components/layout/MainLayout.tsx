@@ -1,15 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Link, useLocation } from 'wouter';
-import { useAppStore } from '@/store';
 import { useAuthStore } from '@/store/authStore';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { alertsApi } from '@/lib/api';
-import { 
-  LayoutDashboard, Terminal, AlertTriangle, Shield, 
+import {
+  LayoutDashboard, Terminal, AlertTriangle, Shield,
   Target, Database, Settings, Bell, Users, ClipboardList,
-  LogOut, Server, Wifi, WifiOff, ChevronRight
+  LogOut, Server, Wifi, WifiOff,
 } from 'lucide-react';
-import { ROLE_LABELS, ROLE_COLORS } from '@/lib/constants';
+import { ROLE_LABELS } from '@/lib/constants';
 import { NotificationBell } from '@/components/widgets/NotificationBell';
 
 const NAV_ITEMS = [
@@ -32,42 +31,25 @@ function NavItem({ href, icon: Icon, label, active, badge, badgeCount }: {
   href: string; icon: React.ElementType; label: string; active: boolean;
   badge?: boolean; badgeCount?: number;
 }) {
-  const [showTooltip, setShowTooltip] = useState(false);
-
   return (
-    <div className="relative group" onMouseEnter={() => setShowTooltip(true)} onMouseLeave={() => setShowTooltip(false)}>
-      <Link
-        href={href}
-        className={`
-          relative flex items-center justify-center w-10 h-10 rounded-lg mx-auto transition-all duration-150
-          ${active
-            ? 'bg-primary/15 text-primary'
-            : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-          }
-        `}
-      >
-        {active && (
-          <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full -ml-2" />
-        )}
-        <Icon className="w-5 h-5" />
-        {badge && badgeCount && badgeCount > 0 && (
-          <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-        )}
-      </Link>
-      {showTooltip && (
-        <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50 pointer-events-none">
-          <div className="bg-popover border border-border text-popover-foreground text-xs font-medium px-2.5 py-1.5 rounded-lg shadow-lg whitespace-nowrap flex items-center gap-2">
-            {label}
-            {badge && badgeCount && badgeCount > 0 && (
-              <span className="bg-destructive text-destructive-foreground text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">
-                {badgeCount}
-              </span>
-            )}
-          </div>
-          <div className="absolute right-full top-1/2 -translate-y-1/2 mr-[-1px] border-4 border-transparent border-r-border" />
-        </div>
+    <Link
+      href={href}
+      className={`
+        flex items-center gap-3 h-10 pl-3 pr-4 rounded-lg mx-1 border-l-2 transition-all duration-150
+        ${active
+          ? 'border-primary bg-primary/10 text-primary'
+          : 'border-transparent text-slate-400 hover:bg-slate-700/50 hover:text-slate-200'
+        }
+      `}
+    >
+      <Icon className="w-5 h-5 shrink-0" />
+      <span className="text-[13px] font-medium whitespace-nowrap truncate flex-1">{label}</span>
+      {badge && badgeCount && badgeCount > 0 && (
+        <span className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center px-1">
+          {badgeCount > 99 ? '99+' : badgeCount}
+        </span>
       )}
-    </div>
+    </Link>
   );
 }
 
@@ -125,82 +107,84 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
-      {/* Splunk-style compact icon rail */}
-      <aside className="w-14 shrink-0 border-r border-border bg-sidebar flex flex-col items-center py-0 z-20">
-        {/* Logo */}
-        <div className="h-14 flex items-center justify-center border-b border-border w-full shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center">
-            <Shield className="w-4 h-4 text-primary" />
-          </div>
-        </div>
-
-        {/* Primary nav */}
-        <nav className="flex-1 flex flex-col gap-1 py-3 w-full px-2 overflow-y-auto">
-          {NAV_ITEMS.filter(item => can(item.permission)).map((item) => {
-            const active = location === item.href || (item.href !== '/' && location.startsWith(item.href));
-            return (
-              <NavItem
-                key={item.href}
-                href={item.href}
-                icon={item.icon}
-                label={item.label}
-                active={active}
-                badge={item.badge}
-                badgeCount={newAlertsCount}
-              />
-            );
-          })}
-
-          {ADMIN_NAV.some(item => can(item.permission)) && (
-            <>
-              <div className="border-t border-border/50 my-1 mx-1" />
-              {ADMIN_NAV.filter(item => can(item.permission)).map((item) => {
-                const active = location.startsWith(item.href);
-                return (
-                  <NavItem
-                    key={item.href}
-                    href={item.href}
-                    icon={item.icon}
-                    label={item.label}
-                    active={active}
-                  />
-                );
-              })}
-            </>
-          )}
-        </nav>
-
-        {/* User avatar + logout at bottom */}
-        <div className="shrink-0 flex flex-col items-center gap-1 pb-3 px-2 w-full border-t border-border pt-3">
-          {/* User avatar with tooltip */}
-          <div className="relative group">
-            <button
-              className="w-10 h-10 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center hover:bg-primary/30 transition-colors"
-              title={displayName}
-            >
-              <span className="text-xs font-bold text-primary">{initials}</span>
-            </button>
-            <div className="absolute left-full ml-3 bottom-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
-              <div className="bg-popover border border-border text-popover-foreground text-xs px-2.5 py-2 rounded-lg shadow-lg whitespace-nowrap min-w-32">
-                <p className="font-semibold text-foreground">{displayName}</p>
-                <p className="text-muted-foreground mt-0.5">{ROLE_LABELS[user?.role ?? 'viewer']}</p>
-              </div>
+      {/*
+        ── Hover-expand sidebar ────────────────────────────────────────────
+        w-14 collapsed → w-56 on hover. Inner content is always at min-w-56
+        so labels simply get revealed by the sidebar expanding (overflow-hidden
+        clips them when collapsed).
+      */}
+      <aside
+        className="group/sidebar shrink-0 border-r border-border bg-sidebar flex flex-col z-20 overflow-hidden transition-[width] duration-200 ease-out w-14 hover:w-56"
+        style={{ willChange: 'width' }}
+      >
+        {/* Fixed-width inner wrapper — always 224px, clipped by aside overflow */}
+        <div className="w-56 flex flex-col flex-1">
+          {/* Logo */}
+          <div className="h-14 flex items-center shrink-0 px-3 gap-3 border-b border-border">
+            <div className="w-8 h-8 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
+              <Shield className="w-4 h-4 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-foreground whitespace-nowrap leading-tight">SecOps Console</p>
+              <p className="text-[10px] text-slate-500 whitespace-nowrap">Security Operations</p>
             </div>
           </div>
 
-          {/* Logout */}
-          <div className="relative group">
+          {/* Primary nav */}
+          <nav className="flex-1 flex flex-col gap-0.5 py-3 overflow-y-auto">
+            {NAV_ITEMS.filter(item => can(item.permission)).map((item) => {
+              const active = location === item.href || (item.href !== '/' && location.startsWith(item.href));
+              return (
+                <NavItem
+                  key={item.href}
+                  href={item.href}
+                  icon={item.icon}
+                  label={item.label}
+                  active={active}
+                  badge={item.badge}
+                  badgeCount={newAlertsCount}
+                />
+              );
+            })}
+
+            {ADMIN_NAV.some(item => can(item.permission)) && (
+              <>
+                <div className="border-t border-border/40 my-2 mx-3" />
+                <p className="px-4 pb-1 text-[10px] font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">Admin</p>
+                {ADMIN_NAV.filter(item => can(item.permission)).map((item) => {
+                  const active = location.startsWith(item.href);
+                  return (
+                    <NavItem
+                      key={item.href}
+                      href={item.href}
+                      icon={item.icon}
+                      label={item.label}
+                      active={active}
+                    />
+                  );
+                })}
+              </>
+            )}
+          </nav>
+
+          {/* User + Logout at bottom */}
+          <div className="shrink-0 border-t border-border px-2 py-3 space-y-0.5">
+            <div className="flex items-center gap-3 px-2 py-2 rounded-lg">
+              <div className="w-8 h-8 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
+                <span className="text-xs font-bold text-primary">{initials}</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-foreground whitespace-nowrap truncate">{displayName}</p>
+                <p className="text-[10px] text-slate-500 whitespace-nowrap">{ROLE_LABELS[user?.role ?? 'viewer']}</p>
+              </div>
+            </div>
             <button
               onClick={() => logout()}
-              className="w-10 h-10 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+              className="flex items-center gap-3 w-full h-9 px-3 rounded-lg border-l-2 border-transparent text-slate-500 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/50 transition-all duration-150"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-4 h-4 shrink-0" />
+              <span className="text-[13px] font-medium whitespace-nowrap">Sign Out</span>
             </button>
-            <div className="absolute left-full ml-3 bottom-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
-              <div className="bg-popover border border-border text-popover-foreground text-xs font-medium px-2.5 py-1.5 rounded-lg shadow-lg whitespace-nowrap">
-                Sign out
-              </div>
-            </div>
           </div>
         </div>
       </aside>
@@ -208,8 +192,8 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-14 shrink-0 border-b border-border bg-card/50 backdrop-blur-md flex items-center justify-between px-4 z-10 sticky top-0">
-          <div className="flex items-center bg-input border border-border rounded-lg px-3 py-1.5 w-80 focus-within:ring-2 focus-within:ring-primary/50 transition-shadow">
+        <header className="h-14 shrink-0 border-b border-border bg-card/60 backdrop-blur-md flex items-center justify-between px-4 z-10 sticky top-0">
+          <div className="flex items-center bg-input border border-border rounded-lg px-3 py-1.5 w-80 focus-within:ring-1 focus-within:ring-primary/50 transition-shadow">
             <svg className="w-3.5 h-3.5 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -221,14 +205,11 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-3">
-            <div
-              className="flex items-center gap-1.5 cursor-default"
-              title={wsConnected ? 'Live alerts connected' : 'Reconnecting...'}
-            >
+            <div className="flex items-center gap-1.5 cursor-default" title={wsConnected ? 'Live alerts connected' : 'Reconnecting...'}>
               {wsConnected ? (
-                <><Wifi className="w-3.5 h-3.5 text-green-400" /><span className="text-xs text-green-400 hidden sm:inline">Live</span></>
+                <><Wifi className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs text-emerald-400 hidden sm:inline">Live</span></>
               ) : (
-                <><WifiOff className="w-3.5 h-3.5 text-muted-foreground animate-pulse" /><span className="text-xs text-muted-foreground hidden sm:inline">Offline</span></>
+                <><WifiOff className="w-3.5 h-3.5 text-slate-500 animate-pulse" /><span className="text-xs text-slate-500 hidden sm:inline">Offline</span></>
               )}
             </div>
             <div className="w-px h-5 bg-border" />
@@ -247,9 +228,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
           {/* WebSocket alert toast */}
           {wsAlertToast && (
-            <div className="fixed top-16 right-4 z-50 bg-card border border-primary/40 rounded-xl px-4 py-3 shadow-2xl flex items-start gap-3 max-w-xs animate-in slide-in-from-right-4 duration-300">
-              <div className="w-7 h-7 rounded-full bg-destructive/10 flex items-center justify-center shrink-0">
-                <Bell className="w-3.5 h-3.5 text-destructive" />
+            <div className="fixed top-16 right-4 z-50 bg-card border border-primary/30 rounded-xl px-4 py-3 shadow-2xl flex items-start gap-3 max-w-xs animate-in slide-in-from-right-4 duration-300">
+              <div className="w-7 h-7 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
+                <Bell className="w-3.5 h-3.5 text-red-400" />
               </div>
               <div>
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">New Alert</p>

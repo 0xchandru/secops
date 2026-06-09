@@ -267,7 +267,7 @@ export const rulesApi = {
   delete: (id: string) => apiClient.delete(`/rules/${id}`),
   toggle: (id: string, enabled: boolean) => apiClient.patch(`/rules/${id}/toggle`, { enabled }),
   test: (ruleData: Record<string, any>) =>
-    apiClient.post<{ matchedEvents?: number; totalEvents?: number; valid?: boolean; errors?: string[] }>("/rules/test", ruleData),
+    apiClient.post<{ matchedEvents?: number; totalEvents?: number; valid?: boolean; errors?: string[]; sampleEvents?: any[] }>("/rules/test", ruleData),
   stats: (id: string) => apiClient.get<Record<string, any>>(`/rules/${id}/stats`),
 };
 
