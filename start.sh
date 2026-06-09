@@ -7,9 +7,17 @@ fuser -k 5000/tcp 2>/dev/null || true
 
 cleanup() {
     kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true
+    redis-cli shutdown nosave 2>/dev/null || true
     wait 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
+
+# Start Redis if not already running
+if ! redis-cli ping &>/dev/null 2>&1; then
+    echo "Starting Redis..."
+    redis-server --daemonize yes --loglevel warning
+    sleep 1
+fi
 
 # Install backend deps if needed
 cd /home/runner/workspace/secops-backend
