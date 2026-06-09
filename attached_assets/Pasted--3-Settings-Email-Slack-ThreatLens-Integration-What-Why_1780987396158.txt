@@ -1,0 +1,86 @@
+#3 - Settings: Email, Slack & ThreatLens Integration
+What & Why
+The current Settings page has toggle switches for Email and Slack notifications but no actual configuration fields behind them — they do nothing. This task makes them fully functional: users can configure SMTP credentials for email alerts, a Slack webhook URL for Slack notifications, and a ThreatLens API endpoint + key so IOC enrichment works from the Settings UI rather than requiring manual env var edits.
+
+Done looks like
+Email notifications: A settings sub-section lets the user enter SMTP host, port, username, password, and "from" address. A "Send Test Email" button fires a real test message. When enabled, the backend sends real emails on critical alert triggers and analyst assignments.
+Slack notifications: A settings sub-section accepts a Slack Incoming Webhook URL. A "Send Test Message" button posts a real Slack message. When enabled, critical alerts post a formatted Slack card with alert title, severity, MITRE tactic, and a link.
+ThreatLens integration: A dedicated "Integrations" tab in Settings with a ThreatLens section — fields for API base URL and API key; a "Test Connection" button calls the ThreatLens /health endpoint and shows latency; on save, the values are stored as secrets. The Alert Detail page's IOC enrichment panel uses these stored credentials automatically.
+Notification delivery: The backend has a notification-service module that reads the stored config and actually sends emails/Slack messages when alerts are created or status-changed — no mock, real delivery.
+All credentials are stored as environment secrets via Replit's secrets store, never in the database as plaintext.
+Out of scope
+PagerDuty, Teams, or other channels (future)
+Per-user Slack DMs (webhook only)
+Steps
+Backend notification-service module — Create a notifications module with an EmailTransport (nodemailer) and SlackTransport (HTTP POST to webhook); read config from env secrets; expose POST /api/settings/notifications/test-email and POST /api/settings/notifications/test-slack endpoints.
+Settings persistence — Add a system_settings table (key/value) to the DB schema; create GET /api/settings/system and PATCH /api/settings/system endpoints (admin-only); store non-secret config there; store secrets (SMTP password, Slack webhook, ThreatLens key) via a server-side call to the environment.
+Alert trigger hooks — Hook into alert creation (seedDefaultRules / detection engine) to call the notification service when severity is Critical or High; also notify on assignment changes.
+Email Settings UI — Add an "Email" sub-section to the Notifications tab with SMTP fields, enable toggle, and "Send Test Email" button wired to the test endpoint.
+Slack Settings UI — Add a "Slack" sub-section to the Notifications tab with webhook URL field, enable toggle, and "Send Test Message" button.
+ThreatLens Integrations tab — Add a new "Integrations" tab to Settings with a ThreatLens card: API URL field, API key field (masked), "Test Connection" button (calls ThreatLens /health), and a save button. Wire the Alert Detail IOC enrichment panel to always use the stored ThreatLens config instead of env vars directly.
+Install nodemailer — Add nodemailer and @types/nodemailer to the backend package.
+Relevant files
+secops-frontend/src/pages/SettingsPage.tsx
+secops-backend/src/modules/
+secops-backend/src/db/schema/
+secops-backend/src/lib/scheduler.ts
+secops-frontend/src/pages/AlertDetailPage.tsx
+
+#4 - Detection Engine & Correlation Improvements
+What & Why
+The current detection engine handles simple, threshold, and sequence rules but lacks the depth and reliability of a production SIEM. This task upgrades the correlation engine with temporal join logic, risk-based alerting, anomaly baselines, and improves the built-in detection rules to cover more real-world attack patterns with accurate MITRE mappings.
+
+Done looks like
+Temporal correlation: Sequence rules support a maxSpan window (e.g., "within 10 minutes") enforced in DB queries — not just in-memory. Multi-step sequences correctly match events from the same host/user.
+Risk-based correlation: A risk_score_sum correlation rule type accumulates risk scores from individual events per entity (IP/user/host) over a rolling window and fires a "high-risk entity" alert when the sum exceeds a threshold — similar to Splunk ES Risk Analysis.
+Baseline anomaly detection: A new anomaly rule type computes a rolling 7-day hourly baseline for a given SPL query result count and fires when the current value deviates by more than N standard deviations.
+Improved built-in rules: All 15 existing rules are reviewed and updated with correct Sigma field mappings, accurate MITRE technique IDs, tuned thresholds, and dedupWindows that prevent alert fatigue. At least 10 new rules are added (covering lateral movement, data exfiltration, persistence, privilege escalation, and cloud-specific patterns).
+Rule testing with real data: The "Test Rule" button on the Rule Builder page runs the rule against actual recent log data (last 24 h) and shows matched events count, sample matches, and estimated alert rate — no mocked responses.
+Suppression / exception lists: Rules can have an exceptions block (CIDR, hostname, username) that prevents firing for known-safe entities; the Rule Builder UI has an Exceptions section.
+Alert deduplication: The engine de-duplicates alerts per rule+entity within the dedupWindow at the DB level (INSERT … ON CONFLICT DO NOTHING) so duplicate alerts never appear in the queue.
+Out of scope
+ML-based behavioural analytics
+External threat intel feed ingestion (ThreatLens handles this)
+Steps
+Temporal sequence joins — Rewrite sequence rule evaluation to use SQL window functions or CTEs with timestamp bounds instead of in-memory arrays; ensure maxSpan is enforced correctly per entity.
+Risk score accumulation rule type — Add risk_score_sum rule type to the schema and engine; the scheduler aggregates risk_score from raw_logs per entity over a rolling window and compares to the threshold.
+Anomaly baseline rule type — Add anomaly rule type; the scheduler computes a 7-day rolling hourly baseline for the rule's SPL query and fires when the current count deviates beyond stddevMultiplier.
+DB-level deduplication — Add a (rule_id, entity_key, dedup_bucket) unique index to the alerts table; use INSERT … ON CONFLICT DO NOTHING in the alert insertion path.
+Exceptions / suppression lists — Add an exceptions JSONB column to the rules table; update the rule evaluator to skip matches against exception entries; add Exceptions UI section in Rule Builder.
+Rule test against real data — Update POST /rules/test to execute the rule against actual raw_logs data from the last 24 hours and return matched events; update Rule Builder to display matched events in a table.
+Improved & expanded built-in rules — Audit and rewrite all 15 existing seed rules; add 10+ new rules covering lateral movement (pass-the-hash, PsExec), data exfiltration (large outbound transfers), cloud (unusual IAM activity), persistence (scheduled task creation), and privilege escalation patterns.
+Relevant files
+secops-backend/src/lib/detection/engine.ts
+secops-backend/src/lib/detection/seed-rules.ts
+secops-backend/src/lib/detection/pipeline.ts
+secops-backend/src/lib/scheduler.ts
+secops-backend/src/modules/rules/
+secops-backend/src/db/schema/
+secops-frontend/src/pages/RuleBuilderPage.tsx
+Dependencies
+
+SPL Alerts + Log Explorer Overhaul
+
+
+#5 - README & Architecture Documentation
+What & Why
+The project has no README or architecture documentation. This task creates an impressive, colourful README.md for the GitHub repo and a detailed Architecture.md that maps out every component, data flow, and integration point of the SecOps Console system.
+
+Done looks like
+README.md at the project root is visually rich with badges (build status, license, Node version, PostgreSQL, Redis), a hero ASCII/emoji banner for the SecOps Console brand, feature highlights with emojis, a quick-start section, screenshots placeholder, and links to Architecture.md.
+Architecture.md contains:
+A full system component diagram (described in ASCII/mermaid) showing: SecOps Forwarder → Ingest API → Redis Queue → Pipeline Worker → PostgreSQL; Detection Engine → Alert Engine → Notification Service → Email/Slack; Frontend ↔ Backend REST + WebSocket; ThreatLens enrichment sidecar.
+Description of every major module (parsers, detection engine, SPL evaluator, scheduler, enrichment, RBAC, audit log).
+Database schema overview (all tables and key relationships).
+Data flow diagrams for: (1) log ingestion pipeline, (2) detection/alerting pipeline, (3) SPL query execution.
+Deployment section describing Replit-hosted deployment.
+Out of scope
+Auto-generated API reference docs
+Video demos
+Steps
+README.md — Write a comprehensive, colourful README with badges, feature list, quick-start, environment variable reference, and contribution guidelines.
+Architecture.md — Write the full architecture document with Mermaid diagrams for system overview, ingestion pipeline, and detection pipeline; include DB schema table list and module descriptions.
+Relevant files
+secops-backend/src/
+secops-frontend/src/
+secops-backend/src/db/schema/

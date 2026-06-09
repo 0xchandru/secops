@@ -11,23 +11,35 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Install backend deps if needed
+cd /home/runner/workspace/secops-backend
+if [ ! -f "node_modules/.bin/esbuild" ]; then
+    echo "Installing backend dependencies..."
+    npm install
+fi
+
 # Build backend
 echo "Building backend..."
-cd /home/runner/workspace/secops-backend
 node build.mjs
 
-# Start backend
+# Start backend on port 8080 (env vars already available in Replit env)
 echo "Starting backend on :8080..."
-node --enable-source-maps ./dist/index.mjs &
+PORT=8080 node --enable-source-maps ./dist/index.mjs &
 BACKEND_PID=$!
 
 # Wait for backend to be ready
-sleep 3
+sleep 4
 
-# Start frontend on port 5000
-echo "Starting frontend on :5000..."
+# Install frontend deps if needed
 cd /home/runner/workspace/secops-frontend
-npx vite --host 0.0.0.0 --port 5000 &
+if [ ! -d "node_modules" ]; then
+    echo "Installing frontend dependencies..."
+    npm install
+fi
+
+# Start frontend on port 5000 (proxies /api and /ws to backend:8080)
+echo "Starting frontend on :5000..."
+PORT=5000 npx vite --host 0.0.0.0 --port 5000 &
 FRONTEND_PID=$!
 
 echo "SecOps Console running:"
