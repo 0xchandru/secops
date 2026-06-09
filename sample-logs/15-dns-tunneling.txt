@@ -1,30 +1,12 @@
-<30>Jan 15 08:00:01 workstation05 named[1234]: client @0x7f8b4c query: AAAA0001.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:01 workstation05 named[1234]: client @0x7f8b4c query: AAAA0002.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:01 workstation05 named[1234]: client @0x7f8b4c query: AAAA0003.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:01 workstation05 named[1234]: client @0x7f8b4c query: BBBB0001.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:02 workstation05 named[1234]: client @0x7f8b4c query: BBBB0002.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:02 workstation05 named[1234]: client @0x7f8b4c query: CCCC0001.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:02 workstation05 named[1234]: client @0x7f8b4c query: CCCC0002.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:02 workstation05 named[1234]: client @0x7f8b4c query: DDDD0001.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:03 workstation05 named[1234]: client @0x7f8b4c query: DDDD0002.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:03 workstation05 named[1234]: client @0x7f8b4c query: EEEE0001.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:03 workstation05 named[1234]: client @0x7f8b4c query: EEEE0002.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:03 workstation05 named[1234]: client @0x7f8b4c query: FFFF0001.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:04 workstation05 named[1234]: client @0x7f8b4c query: FFFF0002.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:04 workstation05 named[1234]: client @0x7f8b4c query: 0000AAAA.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:04 workstation05 named[1234]: client @0x7f8b4c query: 0000BBBB.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:04 workstation05 named[1234]: client @0x7f8b4c query: 0000CCCC.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:05 workstation05 named[1234]: client @0x7f8b4c query: 0000DDDD.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:05 workstation05 named[1234]: client @0x7f8b4c query: 0000EEEE.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:05 workstation05 named[1234]: client @0x7f8b4c query: 0000FFFF.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:05 workstation05 named[1234]: client @0x7f8b4c query: 1111AAAA.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:06 workstation05 named[1234]: client @0x7f8b4c query: 1111BBBB.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:06 workstation05 named[1234]: client @0x7f8b4c query: 1111CCCC.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:06 workstation05 named[1234]: client @0x7f8b4c query: 1111DDDD.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:06 workstation05 named[1234]: client @0x7f8b4c query: 1111EEEE.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:07 workstation05 named[1234]: client @0x7f8b4c query: 1111FFFF.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:07 workstation05 named[1234]: client @0x7f8b4c query: 2222AAAA.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:07 workstation05 named[1234]: client @0x7f8b4c query: 2222BBBB.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:07 workstation05 named[1234]: client @0x7f8b4c query: 2222CCCC.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:08 workstation05 named[1234]: client @0x7f8b4c query: 2222DDDD.data.tunnel-c2.xyz IN TXT +
-<30>Jan 15 08:00:08 workstation05 named[1234]: client @0x7f8b4c query: 2222EEEE.data.tunnel-c2.xyz IN TXT +
+<38>Jun  9 10:00:01 infected-pc01 named[8372]: client 10.0.2.55#62001: query: a4f3b2c9d5e16f7a.data.tunnel.evil-domain.xyz IN A
+<38>Jun  9 10:00:02 infected-pc01 named[8372]: client 10.0.2.55#62002: query: b5e4c3d2a1f0e9d8.data.tunnel.evil-domain.xyz IN A
+<38>Jun  9 10:00:03 infected-pc01 named[8372]: client 10.0.2.55#62003: query: c6f5d4e3b2a1f0e9.data.tunnel.evil-domain.xyz IN A
+<38>Jun  9 10:00:04 infected-pc01 named[8372]: client 10.0.2.55#62004: query: d7a6e5f4c3b2a1f0.exfil.tunnel.evil-domain.xyz IN TXT
+<38>Jun  9 10:00:05 infected-pc01 named[8372]: client 10.0.2.55#62005: query: e8b7f6a5d4c3b2a1.exfil.tunnel.evil-domain.xyz IN TXT
+<38>Jun  9 10:00:06 infected-pc01 named[8372]: client 10.0.2.55#62006: query: f9c8a7b6e5d4c3b2.cmd.tunnel.evil-domain.xyz IN A
+<38>Jun  9 10:00:07 infected-pc01 named[8372]: client 10.0.2.55#62007: query: a0d9b8c7f6e5d4c3.cmd.tunnel.evil-domain.xyz IN A
+<38>Jun  9 10:00:08 infected-pc01 named[8372]: client 10.0.2.55#62008: query: b1e0c9d8a7f6e5d4.beacon.tunnel.evil-domain.xyz IN TXT
+<38>Jun  9 10:00:09 infected-pc01 named[8372]: client 10.0.2.55#62009: query: c2f1d0e9b8a7f6e5.beacon.tunnel.evil-domain.xyz IN TXT
+<38>Jun  9 10:00:10 infected-pc01 named[8372]: client 10.0.2.55#62010: query: d3a2e1f0c9b8a7f6.stage.tunnel.evil-domain.xyz IN A
+<38>Jun  9 10:00:11 infected-pc01 named[8372]: client 10.0.2.55#62011: query: e4b3f2a1d0c9b8a7.stage.tunnel.evil-domain.xyz IN A
+<38>Jun  9 10:00:12 infected-pc01 named[8372]: client 10.0.2.55#62012: query: f5c4a3b2e1d0c9b8.download.tunnel.evil-domain.xyz IN TXT

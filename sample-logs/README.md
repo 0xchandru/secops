@@ -1,74 +1,76 @@
-# Sample Alert-Generating Logs
+# Sample Logs — Alert Trigger Samples
 
-Raw log samples for each detection rule. **23 files** covering all parser formats — original (syslog, Windows EventLog, firewall, CEF, CloudTrail) plus new parsers (Apache/Nginx, VPC Flow, DNS). Each file can be sent via the ingestion API or pasted into the Raw Log Paste panel.
+Each file in this directory contains real log events crafted to trigger one or more of the 15 seeded detection rules. Send them via the ingest API or paste them in the Log Explorer raw ingest panel.
 
-## Usage
+---
 
-### Single log
+## Quick Ingest (all files)
+
+Replace `<token>` with your bearer token (login first via `/api/auth/login`).
+
 ```bash
-curl -X POST http://localhost:3000/api/ingest-log \
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"source": "<source_type>", "message": "<raw_log_line>"}'
+  -d '{"username":"admin","password":"Admin@123"}' | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4)
+echo "Token: $TOKEN"
 ```
 
-### Bulk (for threshold rules)
+### Send a JSONL file (Windows EventLog)
 ```bash
-curl -X POST http://localhost:3000/api/ingest/bulk \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"logs": [{"source":"<source_type>","message":"<line1>"}, ...]}'
+# Read each line and send as individual events
+while IFS= read -r line; do
+  curl -s -X POST http://localhost:8080/api/ingest-log \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $TOKEN" \
+    -d "{\"source\":\"windows_eventlog\",\"message\":$(echo $line | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}"
+done < sample-logs/02-powershell-execution.jsonl
 ```
 
-### Raw text (paste / pipe entire file)
+### Send a raw text file (syslog, firewall, CEF)
 ```bash
-curl -X POST http://localhost:3000/api/ingest/raw?source=<source_type> \
+curl -s -X POST "http://localhost:8080/api/ingest/raw?source=syslog" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"text": "<paste entire file contents>"}'
+  -H "Authorization: Bearer $TOKEN" \
+  -d "{\"text\":\"$(cat sample-logs/04-ssh-brute-force.txt | tr '\n' '|' | sed 's/|/\\n/g')\"}"
 ```
 
-## Rules Index
+### Send a CloudTrail JSON file
+```bash
+curl -s -X POST http://localhost:8080/api/ingest-log \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "{\"source\":\"cloudtrail\",\"message\":$(cat sample-logs/12-cloudtrail-root.json | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')}"
+```
 
-| # | File | Rule | Type | Severity | MITRE |
-|---|------|------|------|----------|-------|
-| 1 | `01-brute-force-login.jsonl` | Brute Force Login Attempt | threshold | high | T1110 |
-| 2 | `02-suspicious-powershell.jsonl` | Suspicious PowerShell Execution | simple | high | T1059.001 |
-| 3 | `03-psexec-lateral-movement.jsonl` | PsExec-style Lateral Movement | simple | critical | T1021.002 |
-| 4 | `04-ssh-brute-force.txt` | SSH Brute Force | threshold | medium | T1110 |
-| 5 | `05-firewall-blocked-repeated.txt` | Firewall Connection Blocked – Repeated | threshold | medium | T1046 |
-| 6 | `06-dns-c2-domain.txt` | DNS Query to Known C2 Domain | simple | critical | T1071.004 |
-| 7 | `07-rdp-external-logon.jsonl` | RDP Logon from External IP | simple | high | T1021.001 |
-| 8 | `08-new-user-created.jsonl` | New User Account Created | simple | medium | T1136.001 |
-| 9 | `09-http-post-external.txt` | Suspicious HTTP POST to External IP | simple | high | T1041 |
-| 10 | `10-registry-run-key.jsonl` | Windows Registry Run Key Modification | simple | high | T1547.001 |
-| 11 | `11-kerberoasting-spn.jsonl` | Kerberoasting – SPN Request Spike | threshold | high | T1558.003 |
-| 12 | `12-cloudtrail-root.json` | CloudTrail – Root Account Usage | simple | critical | T1078.004 |
-| 13 | `13-credential-dumping.jsonl` | Credential Dumping Tool Detected | simple | critical | T1003 |
-| 14 | `14-login-after-creation.jsonl` | Login After Account Creation | sequence | high | T1136.001 |
-| 15 | `15-dns-tunneling.txt` | Excessive DNS Queries – Possible Tunneling | threshold | high | T1071.004 |
-| 16 | `16-apache-access-scan.log` | Web Scanner/Crawler Detection | threshold | high | T1595.002 |
-| 17 | `17-nginx-500-errors.log` | Web Server Error Spike (500s) | threshold | medium | T1190 |
-| 18 | `18-vpc-flow-portscan.txt` | Port Scan Detected (VPC Flow) | threshold | high | T1046 |
-| 19 | `19-vpc-flow-ssh-brute.txt` | SSH Brute Force via VPC Flow | threshold | high | T1110 |
-| 20 | `20-dns-tunneling-bind.txt` | DNS Tunneling – BIND Encoded Subdomains | threshold | critical | T1071.004 |
-| 21 | `21-dns-suspicious-domains.txt` | Suspicious Domain Lookups (DGA/Malicious TLD) | simple | high | T1071.004 |
-| 22 | `22-vpc-flow-exfiltration.txt` | Data Exfiltration via Large Outbound Transfer | threshold | critical | T1048 |
-| 23 | `23-nginx-sqli-attempt.log` | SQL Injection Attempt (Web Logs) | simple | critical | T1190 |
+---
+
+## Files and Alert Mapping
+
+| File | Source Type | Rule Triggered | Severity | MITRE |
+|---|---|---|---|---|
+| `01-brute-force-windows.jsonl` | `windows_eventlog` | Brute Force Login Attempt | HIGH | T1110 |
+| `02-powershell-execution.jsonl` | `windows_eventlog` | Suspicious PowerShell Execution | HIGH | T1059.001 |
+| `03-psexec-lateral-movement.jsonl` | `windows_eventlog` | PsExec-style Lateral Movement | CRITICAL | T1021.002 |
+| `04-ssh-brute-force.txt` | `syslog` | SSH Brute Force | MEDIUM | T1110 |
+| `05-firewall-port-scan.txt` | `syslog` | Firewall Connection Blocked – Repeated | MEDIUM | T1046 |
+| `06-dns-c2-beaconing.jsonl` | `windows_eventlog` | DNS Query to Known C2 Domain | CRITICAL | T1071.004 |
+| `07-rdp-external-login.jsonl` | `windows_eventlog` | RDP Logon from External IP | HIGH | T1021.001 |
+| `08-new-user-created.jsonl` | `windows_eventlog` | New User Account Created | MEDIUM | T1136.001 |
+| `09-http-exfiltration.txt` | `cef` | Suspicious HTTP POST to External IP | HIGH | T1041 |
+| `10-registry-persistence.jsonl` | `windows_eventlog` | Windows Registry Run Key Modification | HIGH | T1547.001 |
+| `11-kerberoasting.jsonl` | `windows_eventlog` | Kerberoasting – SPN Request Spike | HIGH | T1558.003 |
+| `12-cloudtrail-root.json` | `cloudtrail` | CloudTrail – Root Account Usage | CRITICAL | T1078.004 |
+| `13-credential-dumping.jsonl` | `windows_eventlog` | Credential Dumping Tool Detected | CRITICAL | T1003 |
+| `14-account-creation-login.jsonl` | `windows_eventlog` | Login After Account Creation (sequence) | HIGH | T1136.001 |
+| `15-dns-tunneling.txt` | `syslog` | Excessive DNS Queries – Possible Tunneling | HIGH | T1071.004 |
+
+---
 
 ## Notes
 
-- **Threshold rules** require sending enough events to exceed the count threshold (send all lines in the file).
-- **Sequence rules** require sending Step 1 first, then Step 2 within the configured time window.
-- `.jsonl` files: each line is a Windows EventLog JSON — use `source: "windows_eventlog"`.
-- `.txt` files: each line is a syslog/firewall/CEF/VPC Flow/DNS raw line — use the `source` noted in the file header comment.
-- `.log` files: each line is an Apache or Nginx access log — use `source: "apache"` or `source: "nginx"`.
-- `.json` files: the entire file is a single CloudTrail JSON event — use `source: "cloudtrail"`.
-
-### New Parser Formats (Files 16–23)
-
-Files 16–23 cover the three new parser types added to the detection pipeline:
-
-- **Apache/Nginx** (`16`, `17`, `23`): Combined Log Format access logs. Parser extracts HTTP method, URL, status code, user-agent, referrer, and source IP. Use `source: "apache"` or `source: "nginx"`.
-- **VPC Flow Logs** (`18`, `19`, `22`): AWS VPC Flow Log v2 (space-delimited, 14 fields). Parser extracts src/dst IP/port, protocol, action, bytes, and well-known service names. Use `source: "vpc_flow"`.
-- **DNS Query Logs** (`20`, `21`): BIND/named and dnsmasq formats. Parser detects DNS tunneling (high-entropy subdomains), DGA patterns, and suspicious TLDs. Use `source: "dns"`.
+- **Threshold rules** (brute force, SSH, firewall, kerberoasting, DNS tunneling): each file contains enough events (6–12) to cross the configured threshold within one ingest call.
+- **Simple rules** (PowerShell, PsExec, RDP, registry, credential dumping, C2 DNS): one matching event is enough to fire the alert.
+- **Sequence rule** (file 14): the file contains both Step 1 (user creation) and Step 2 (login) with the same `TargetUserName`. Send all lines together — the detection engine processes them sequentially.
+- `.jsonl` files: send each line separately with `source: "windows_eventlog"`, or use the bulk ingest endpoint.
+- `.txt` files: send the entire file contents as `source: "syslog"` or `source: "cef"` using the raw ingest endpoint.
+- `.json` files: send the whole JSON object as `source: "cloudtrail"`.

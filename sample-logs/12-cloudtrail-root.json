@@ -5,27 +5,34 @@
     "principalId": "123456789012",
     "arn": "arn:aws:iam::123456789012:root",
     "accountId": "123456789012",
-    "accessKeyId": "AKIAIOSFODNN7EXAMPLE"
-  },
-  "eventTime": "2025-01-15T07:00:00Z",
-  "eventSource": "iam.amazonaws.com",
-  "eventName": "CreateUser",
-  "awsRegion": "us-east-1",
-  "sourceIPAddress": "203.0.113.55",
-  "userAgent": "aws-cli/2.15.0 Python/3.11.6",
-  "requestParameters": {
-    "userName": "backdoor-user"
-  },
-  "responseElements": {
-    "user": {
-      "userName": "backdoor-user",
-      "userId": "AIDACKCEVSQ6C2EXAMPLE",
-      "arn": "arn:aws:iam::123456789012:user/backdoor-user",
-      "createDate": "2025-01-15T07:00:00Z"
+    "sessionContext": {
+      "sessionIssuer": {},
+      "webIdFederationData": {},
+      "attributes": {
+        "creationDate": "2025-06-09T08:00:00Z",
+        "mfaAuthenticated": "false"
+      }
     }
   },
-  "requestID": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "eventID": "f1e2d3c4-b5a6-7890-abcd-1234567890ef",
+  "eventTime": "2025-06-09T08:05:44Z",
+  "eventSource": "iam.amazonaws.com",
+  "eventName": "CreateAccessKey",
+  "awsRegion": "us-east-1",
+  "sourceIPAddress": "185.220.101.45",
+  "userAgent": "Boto3/1.26.0 Python/3.11.0 Linux/5.15.0",
+  "requestParameters": {
+    "userName": "malicious_svc_account"
+  },
+  "responseElements": {
+    "accessKey": {
+      "accessKeyId": "AKIA1234567890EXAMPLE",
+      "status": "Active",
+      "userName": "malicious_svc_account",
+      "createDate": "Jun 9, 2025 8:05:44 AM"
+    }
+  },
+  "requestID": "a1b2c3d4-1234-5678-abcd-ef0123456789",
+  "eventID": "12345678-abcd-ef01-2345-6789abcdef01",
   "readOnly": false,
   "eventType": "AwsApiCall",
   "managementEvent": true,
