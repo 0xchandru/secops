@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { requireAuth, requireAuthOrApiKey } from "../../middlewares/auth.middleware";
-import { can } from "../../middlewares/rbac.middleware";
+import { can, canOrApiKeyScope } from "../../middlewares/rbac.middleware";
 import { db, forwardersTable } from "../../db";
 import { eq, desc, sql } from "drizzle-orm";
 
@@ -9,7 +9,7 @@ const router = Router();
 
 // POST /forwarders/heartbeat — upsert forwarder registration + last-seen stats
 // Auth: Bearer token (API key or session JWT)
-router.post("/forwarders/heartbeat", requireAuthOrApiKey, async (req: Request, res: Response) => {
+router.post("/forwarders/heartbeat", requireAuthOrApiKey, canOrApiKeyScope("ingest:write"), async (req: Request, res: Response) => {
   const { name, host, version, totalEventsSent, eps, monitors } = req.body as {
     name?: string;
     host?: string;

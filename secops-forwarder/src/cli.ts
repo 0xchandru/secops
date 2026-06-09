@@ -84,7 +84,7 @@ async function main(): Promise<void> {
       break;
 
     case "status":
-      statusCommand({ dataDir });
+      statusCommand({ configDir, dataDir });
       break;
 
     case "test-config":

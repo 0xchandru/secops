@@ -100,22 +100,33 @@ router.post("/ingest/bulk", requireAuthOrApiKey, canOrApiKeyScope("ingest:write"
     return;
   }
 
-  const values = logs.map((l: Record<string, any>) => ({
-    source: String(l.source ?? l.host ?? l.hostname ?? "file-upload"),
-    severity: ["critical", "high", "medium", "low", "info"].includes(String(l.severity ?? "").toLowerCase())
-      ? String(l.severity).toLowerCase()
-      : "info",
-    eventType: l.eventType ?? l.event_type ?? l.EventType ?? undefined,
-    sourceIp: l.sourceIp ?? l.source_ip ?? l.src_ip ?? l.src ?? undefined,
-    destIp: l.destIp ?? l.dest_ip ?? l.dst_ip ?? l.dst ?? undefined,
-    hostname: l.hostname ?? l.host ?? undefined,
-    username: l.username ?? l.user ?? undefined,
-    message: l.message ?? l.msg ?? l.Message ?? JSON.stringify(l),
-    rawData: l as any,
-    sourcetype: l.sourcetype ?? l.source_type ?? bulkSourcetype ?? null,
-    linecount: l.linecount ?? null,
-    processed: "false" as const,
-  }));
+  const values = logs.map((l: Record<string, any>) => {
+    // Resolve parsedTimestamp: forwarder sends ISO string, store as Date
+    let parsedTs: Date | undefined;
+    const tsRaw = l.parsedTimestamp ?? l.parsed_timestamp ?? l.timestamp;
+    if (tsRaw) {
+      const d = new Date(tsRaw);
+      if (!isNaN(d.getTime())) parsedTs = d;
+    }
+    return {
+      source: String(l.source ?? l.host ?? l.hostname ?? "file-upload"),
+      severity: ["critical", "high", "medium", "low", "info"].includes(String(l.severity ?? "").toLowerCase())
+        ? String(l.severity).toLowerCase()
+        : "info",
+      eventType: l.eventType ?? l.event_type ?? l.EventType ?? undefined,
+      sourceIp: l.sourceIp ?? l.source_ip ?? l.src_ip ?? l.src ?? undefined,
+      destIp: l.destIp ?? l.dest_ip ?? l.dst_ip ?? l.dst ?? undefined,
+      hostname: l.hostname ?? l.host ?? undefined,
+      username: l.username ?? l.user ?? undefined,
+      message: l.message ?? l.msg ?? l.Message ?? JSON.stringify(l),
+      rawData: l as any,
+      sourcetype: l.sourcetype ?? l.source_type ?? bulkSourcetype ?? null,
+      indexName: String(l.index ?? l.indexName ?? l.index_name ?? "main"),
+      parsedTimestamp: parsedTs ?? null,
+      linecount: l.linecount ?? null,
+      processed: "false" as const,
+    };
+  });
 
   const inserted = await db.insert(rawLogsTable).values(values).returning({
     id: rawLogsTable.id,
