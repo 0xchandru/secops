@@ -146,7 +146,7 @@ function AlertRow({ alert, assigneeName, selectedIds, toggleSelect, currentUserI
 
       {/* Actions */}
       <td className="px-3 py-3.5 text-right">
-        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center justify-end gap-1">
           {actions.canInvestigate && (
             <button onClick={e => handleQuickAction(e, alert.id, 'investigating')} title="Start Investigation"
               className="p-1.5 text-amber-400 hover:bg-amber-400/10 rounded-lg transition-colors">

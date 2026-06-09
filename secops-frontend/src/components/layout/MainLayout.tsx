@@ -24,7 +24,7 @@ const NAV_ITEMS = [
 const ADMIN_NAV = [
   { href: '/users', icon: Users, label: 'Users', permission: 'users:manage' as const },
   { href: '/audit', icon: ClipboardList, label: 'Audit Logs', permission: 'audit:view' as const },
-  { href: '/settings', icon: Settings, label: 'Settings', permission: 'reports:view' as const },
+  { href: '/settings', icon: Settings, label: 'Settings', permission: 'users:manage' as const },
 ];
 
 function NavItem({ href, icon: Icon, label, active, badge, badgeCount }: {
@@ -34,6 +34,7 @@ function NavItem({ href, icon: Icon, label, active, badge, badgeCount }: {
   return (
     <Link
       href={href}
+      title={label}
       className={`
         flex items-center gap-3 h-10 pl-3 pr-4 rounded-lg mx-1 border-l-2 transition-all duration-150
         ${active

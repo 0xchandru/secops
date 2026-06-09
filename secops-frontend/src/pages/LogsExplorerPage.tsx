@@ -155,6 +155,9 @@ interface SavedSearch { id: string; name: string; query: string; timeRange: stri
 // ── Splunk-style Time Picker ──────────────────────────────────────────────
 function SplunkTimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = React.useState(false);
+  const [tab, setTab] = React.useState<'presets' | 'custom'>('presets');
+  const [customFrom, setCustomFrom] = React.useState('');
+  const [customTo, setCustomTo] = React.useState('');
   const ref = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -165,11 +168,35 @@ function SplunkTimePicker({ value, onChange }: { value: string; onChange: (v: st
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const currentLabel = TIME_RANGES.find(r => r.value === value)?.label ?? 'All time';
+  React.useEffect(() => {
+    if (value.startsWith('custom|')) {
+      const parts = value.split('|');
+      setCustomFrom(parts[1] ? parts[1].slice(0, 16) : '');
+      setCustomTo(parts[2] ? parts[2].slice(0, 16) : '');
+    }
+  }, [value]);
+
+  const currentLabel = React.useMemo(() => {
+    if (value.startsWith('custom|')) {
+      const parts = value.split('|');
+      const from = parts[1] ? new Date(parts[1]).toLocaleDateString() : '';
+      const to = parts[2] ? new Date(parts[2]).toLocaleDateString() : '';
+      return from && to ? `${from} → ${to}` : from ? `From ${from}` : 'Custom Range';
+    }
+    return TIME_RANGES.find(r => r.value === value)?.label ?? 'All time';
+  }, [value]);
+
+  const applyCustom = () => {
+    if (customFrom) {
+      const fromIso = new Date(customFrom).toISOString();
+      const toIso = customTo ? new Date(customTo + ':59').toISOString() : new Date().toISOString();
+      onChange(`custom|${fromIso}|${toIso}`);
+      setOpen(false);
+    }
+  };
 
   return (
     <div ref={ref} className="relative">
-      {/* Trigger button — Splunk-style pill with calendar icon */}
       <button
         onClick={() => setOpen(o => !o)}
         className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border text-sm font-medium transition-all ${
@@ -183,52 +210,83 @@ function SplunkTimePicker({ value, onChange }: { value: string; onChange: (v: st
         <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Dropdown panel */}
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-40 bg-card border border-border rounded-xl shadow-2xl shadow-black/40 w-72 overflow-hidden">
-          {/* Header */}
+        <div className="absolute right-0 top-full mt-1.5 z-40 bg-card border border-border rounded-xl shadow-2xl shadow-black/40 w-80 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-border bg-secondary/20 flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-              <Clock className="w-3 h-3" /> Time Range
-            </span>
+            <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
+              <button onClick={() => setTab('presets')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tab === 'presets' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                Presets
+              </button>
+              <button onClick={() => setTab('custom')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${tab === 'custom' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                Custom Range
+              </button>
+            </div>
             {value && (
-              <button onClick={() => { onChange(''); setOpen(false); }} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+              <button onClick={() => { onChange(''); setOpen(false); }} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors ml-2">
                 Clear
               </button>
             )}
           </div>
 
-          {/* Preset groups */}
-          <div className="p-2">
-            {TIME_PRESET_GROUPS.map((group) => (
-              <div key={group.group} className="mb-1">
-                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                  {group.group}
-                </p>
-                <div className="grid grid-cols-2 gap-0.5">
-                  {group.items.map((item) => {
-                    const isSelected = item.value === value;
-                    return (
-                      <button
-                        key={item.value}
-                        onClick={() => { onChange(item.value); setOpen(false); }}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm transition-all ${
-                          isSelected
-                            ? 'bg-primary/15 text-primary border border-primary/25'
-                            : 'text-foreground hover:bg-secondary/60 border border-transparent'
-                        }`}
-                      >
-                        {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
-                        <span className="text-xs font-medium truncate">{item.label}</span>
-                      </button>
-                    );
-                  })}
+          {tab === 'presets' ? (
+            <div className="p-2">
+              {TIME_PRESET_GROUPS.map((group) => (
+                <div key={group.group} className="mb-1">
+                  <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                    {group.group}
+                  </p>
+                  <div className="grid grid-cols-2 gap-0.5">
+                    {group.items.map((item) => {
+                      const isSelected = item.value === value;
+                      return (
+                        <button
+                          key={item.value}
+                          onClick={() => { onChange(item.value); setOpen(false); }}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-left text-sm transition-all ${
+                            isSelected
+                              ? 'bg-primary/15 text-primary border border-primary/25'
+                              : 'text-foreground hover:bg-secondary/60 border border-transparent'
+                          }`}
+                        >
+                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+                          <span className="text-xs font-medium truncate">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">From</label>
+                <input
+                  type="datetime-local"
+                  value={customFrom}
+                  onChange={e => setCustomFrom(e.target.value)}
+                  className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
               </div>
-            ))}
-          </div>
+              <div>
+                <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">To <span className="normal-case font-normal">(leave blank for now)</span></label>
+                <input
+                  type="datetime-local"
+                  value={customTo}
+                  onChange={e => setCustomTo(e.target.value)}
+                  className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              <button
+                onClick={applyCustom}
+                disabled={!customFrom}
+                className="w-full py-2 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Apply Range
+              </button>
+            </div>
+          )}
 
-          {/* Current selection footer */}
           <div className="px-4 py-2.5 border-t border-border/50 bg-secondary/10">
             <p className="text-[10px] text-muted-foreground">
               <span className="font-semibold text-foreground">{currentLabel}</span>
@@ -494,7 +552,7 @@ export default function LogsExplorerPage() {
   const facetParams = useMemo(() => ({
     fields: FACET_FIELDS.map(f => f.key),
     limit: 15,
-    from: timeRange || undefined,
+    from: (timeRange && !timeRange.startsWith('custom|')) ? timeRange : undefined,
     q: effectiveSearch || undefined,
   }), [timeRange, effectiveSearch]);
 
@@ -514,13 +572,19 @@ export default function LogsExplorerPage() {
   const queryParams = useMemo(() => {
     const p: Record<string, string | number> = { page, limit: PAGE_SIZE };
     if (!hasSplPipes && effectiveSearch.length >= 2) p.q = effectiveSearch;
-    if (timeRange) p.from = timeRange;
+    if (timeRange.startsWith('custom|')) {
+      const parts = timeRange.split('|');
+      if (parts[1]) p.startTime = parts[1];
+      if (parts[2]) p.endTime = parts[2];
+    } else if (timeRange) {
+      p.from = timeRange;
+    }
     return p;
   }, [page, effectiveSearch, timeRange, hasSplPipes]);
 
   const splParams = useMemo(() => ({
     query: effectiveSearch,
-    from: timeRange || undefined,
+    from: timeRange.startsWith('custom|') ? undefined : (timeRange || undefined),
     limit: PAGE_SIZE,
   }), [effectiveSearch, timeRange]);
 
@@ -847,7 +911,15 @@ export default function LogsExplorerPage() {
             {timeRange && (
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary border border-primary/20">
                 <Clock className="w-3 h-3" />
-                {TIME_RANGES.find(t => t.value === timeRange)?.label}
+                {timeRange.startsWith('custom|')
+                  ? (() => {
+                      const parts = timeRange.split('|');
+                      const from = parts[1] ? new Date(parts[1]).toLocaleDateString() : '';
+                      const to = parts[2] ? new Date(parts[2]).toLocaleDateString() : '';
+                      return from && to ? `${from} → ${to}` : from ? `From ${from}` : 'Custom Range';
+                    })()
+                  : TIME_RANGES.find(t => t.value === timeRange)?.label
+                }
                 <button onClick={() => { setTimeRange(''); setPage(1); }} title="Remove time filter" className="hover:opacity-70 ml-0.5"><X className="w-3 h-3" /></button>
               </span>
             )}
@@ -1169,14 +1241,14 @@ export default function LogsExplorerPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/30">
-                      {sortedLogs.map(log => {
+                      {sortedLogs.map((log, logIdx) => {
                         const sevColor = SEVERITY_COLORS[log.severity] || SEVERITY_COLORS.info;
                         const isExpanded = expandedLogId === log.id;
                         const stBadge = log.sourcetype ? (SOURCETYPE_BADGE[log.sourcetype] ?? { label: log.sourcetype.toUpperCase(), cls: 'bg-secondary text-muted-foreground border-border' }) : null;
                         return (
                           <React.Fragment key={log.id}>
                           <tr
-                            className={`hover:bg-secondary/40 transition-all cursor-pointer group ${isExpanded ? 'bg-primary/5 border-b-0' : ''} ${selectedLog?.id === log.id ? 'ring-1 ring-inset ring-primary/20' : ''}`}
+                            className={`hover:bg-secondary/40 transition-all cursor-pointer group ${isExpanded ? 'bg-primary/5 border-b-0' : logIdx % 2 !== 0 ? 'bg-secondary/10' : ''} ${selectedLog?.id === log.id ? 'ring-1 ring-inset ring-primary/20' : ''}`}
                             onClick={() => setExpandedLogId(isExpanded ? null : log.id)}>
                             {visibleColumns.map(colKey => {
                               if (colKey === 'timestamp') return (
@@ -1247,15 +1319,15 @@ export default function LogsExplorerPage() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-1">
                                 {stBadge && (
-                                  <span className={`hidden xl:inline-block text-[9px] font-mono font-bold px-1 py-0.5 rounded border ${stBadge.cls} opacity-0 group-hover:opacity-100 transition-opacity`}>
+                                  <span className={`hidden xl:inline-block text-[9px] font-mono font-bold px-1 py-0.5 rounded border ${stBadge.cls}`}>
                                     {stBadge.label}
                                   </span>
                                 )}
                                 <button aria-label="View log details" onClick={(e) => { e.stopPropagation(); setSelectedLog(log); }}
-                                  className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100">
+                                  className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors">
                                   <Eye className="w-4 h-4" />
                                 </button>
-                                <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 opacity-0 group-hover:opacity-100 ${isExpanded ? 'rotate-180 opacity-100' : ''}`} />
+                                <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
                               </div>
                             </td>
                           </tr>

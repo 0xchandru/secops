@@ -4,7 +4,7 @@ import { rulesApi, normalizeRule } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { safeFormat } from '@/lib/date-utils';
 import { SeverityBadge } from '@/components/ui/Badge';
-import { Shield, Plus, Search, Power, PowerOff, Code, Trash2, X, Copy, CheckCheck, Lock, Loader2, BarChart3, ChevronDown, Pencil } from 'lucide-react';
+import { Shield, Plus, Search, Power, PowerOff, Code, Trash2, X, Copy, CheckCheck, Lock, Loader2, BarChart3, ChevronDown, Pencil, FilePlus, Sigma } from 'lucide-react';
 import { useLocation } from 'wouter';
 import type { DetectionRule } from '@/lib/types';
 
@@ -108,6 +108,8 @@ export default function DetectionRulesPage() {
   const canWrite  = can('rules:write');
   const canDelete = can('rules:delete');
   const canToggle = can('rules:toggle');
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const { data, isLoading } = useQuery({
     queryKey: ['rules'],
@@ -136,10 +138,38 @@ export default function DetectionRulesPage() {
     },
   });
 
+  const cloneMutation = useMutation({
+    mutationFn: (rule: DetectionRule) => rulesApi.create({
+      name: `Copy of ${rule.name}`,
+      description: rule.description,
+      severity: rule.severity,
+      enabled: false,
+      yaml: rule.yaml || '',
+      mitreIds: rule.mitreIds,
+      ruleType: rule.ruleType,
+      author: rule.author,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rules'] });
+      showToast('Rule duplicated successfully');
+    },
+  });
+
   const ruleToDelete = rules.find(r => r.id === confirmDeleteId);
+
+  const RULE_TYPE_BADGE: Record<string, { label: string; cls: string }> = {
+    sigma:           { label: 'Σ Sigma',    cls: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
+    spl_saved_search:{ label: '⚡ SPL',     cls: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+    behavioral:      { label: '◈ Behavioral', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  };
 
   return (
     <>
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-[100] bg-card border border-emerald-500/30 text-emerald-400 text-sm px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 animate-in slide-in-from-bottom-4">
+          <CheckCheck className="w-4 h-4" /> {toast}
+        </div>
+      )}
       {viewYamlFor && <YamlModal rule={viewYamlFor} onClose={() => setViewYamlFor(null)} />}
 
       {confirmDeleteId && canDelete && ruleToDelete && (
@@ -277,7 +307,14 @@ export default function DetectionRulesPage() {
                         )}
                       </td>
                       <td className="px-5 py-4">
-                        <div className="font-medium text-foreground mb-0.5">{rule.name}</div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-medium text-foreground truncate">{rule.name}</span>
+                          {rule.ruleType && RULE_TYPE_BADGE[rule.ruleType] && (
+                            <span className={`shrink-0 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${RULE_TYPE_BADGE[rule.ruleType].cls}`}>
+                              {RULE_TYPE_BADGE[rule.ruleType].label}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-muted-foreground truncate max-w-xs">{rule.description}</div>
                       </td>
                       <td className="px-5 py-4"><SeverityBadge severity={rule.severity} /></td>
@@ -292,14 +329,19 @@ export default function DetectionRulesPage() {
                       <td className="px-5 py-4 font-mono text-foreground">{rule.triggerCount.toLocaleString()}</td>
                       <td className="px-5 py-4 text-muted-foreground text-xs">{safeFormat(rule.updatedAt, 'MMM dd, yyyy')}</td>
                       <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button onClick={(e) => { e.stopPropagation(); setExpandedRuleId(prev => prev === rule.id ? null : rule.id); }} className={`p-2 rounded-lg transition-colors ${expandedRuleId === rule.id ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-primary hover:bg-primary/10'}`} title="View Stats">
                             <BarChart3 className="w-4 h-4" />
                           </button>
                           {canWrite && (
-                            <button onClick={(e) => { e.stopPropagation(); setLocation(`/rules/${rule.id}/edit`); }} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors" title="Edit Rule">
-                              <Pencil className="w-4 h-4" />
-                            </button>
+                            <>
+                              <button onClick={(e) => { e.stopPropagation(); setLocation(`/rules/${rule.id}/edit`); }} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors" title="Edit Rule">
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); cloneMutation.mutate(rule); }} disabled={cloneMutation.isPending} className="p-2 text-muted-foreground hover:text-emerald-400 hover:bg-emerald-400/10 rounded-lg transition-colors" title="Duplicate Rule">
+                                <FilePlus className="w-4 h-4" />
+                              </button>
+                            </>
                           )}
                           <button onClick={(e) => { e.stopPropagation(); setViewYamlFor(rule); }} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors" title="View YAML">
                             <Code className="w-4 h-4" />

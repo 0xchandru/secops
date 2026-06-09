@@ -81,25 +81,24 @@ export function getAvailableActions(ctx: AlertActionContext): AvailableActions {
       return {
         ...base,
         canInvestigate: true,
+        canResolve: true,
+        canFalsePositive: true,
         canAssign: true,
         canEscalate: true,
         canAddNote: true,
         isReadOnly: false,
       };
     case 'investigating':
-      if (isOwner) {
-        return {
-          ...base,
-          canResolve: true,
-          canFalsePositive: true,
-          canEscalate: true,
-          canAssign: true,
-          canAddNote: true,
-          isReadOnly: false,
-        };
-      }
-      // Not the owner — read-only
-      return { ...base, canAddNote: true };
+      return {
+        ...base,
+        canResolve: true,
+        canFalsePositive: true,
+        canEscalate: true,
+        canAssign: true,
+        canAddNote: true,
+        isOwner,
+        isReadOnly: false,
+      };
     case 'escalated':
       return {
         ...base,
