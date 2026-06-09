@@ -64,8 +64,13 @@ export async function startCommand(options: { configDir: string; dataDir: string
       console.log(`   ⏸  Skipped (disabled): ${stanza.path}`);
       continue;
     }
+    const props = config.props.get(stanza.sourcetype);
+    const enrichedStanza = {
+      ...stanza,
+      lineBreaker: props?.lineBreaker ?? stanza.lineBreaker,
+    };
     console.log(`   👁  Monitoring: ${stanza.path} (${stanza.sourcetype})`);
-    monitor.startMonitor(stanza);
+    monitor.startMonitor(enrichedStanza);
   }
 
   const heartbeatInterval = setInterval(async () => {

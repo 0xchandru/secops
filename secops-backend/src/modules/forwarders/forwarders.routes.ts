@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
-import { requireAuth } from "../../middlewares/auth.middleware";
+import { requireAuth, requireAuthOrApiKey } from "../../middlewares/auth.middleware";
 import { can } from "../../middlewares/rbac.middleware";
 import { db, forwardersTable } from "../../db";
 import { eq, desc, sql } from "drizzle-orm";
@@ -9,7 +9,7 @@ const router = Router();
 
 // POST /forwarders/heartbeat — upsert forwarder registration + last-seen stats
 // Auth: Bearer token (API key or session JWT)
-router.post("/forwarders/heartbeat", requireAuth, async (req: Request, res: Response) => {
+router.post("/forwarders/heartbeat", requireAuthOrApiKey, async (req: Request, res: Response) => {
   const { name, host, version, totalEventsSent, eps, monitors } = req.body as {
     name?: string;
     host?: string;
@@ -24,13 +24,13 @@ router.post("/forwarders/heartbeat", requireAuth, async (req: Request, res: Resp
     return;
   }
 
-  const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
-
   const existing = await db
     .select({ id: forwardersTable.id })
     .from(forwardersTable)
     .where(eq(forwardersTable.name, name))
     .limit(1);
+
+  const now = new Date();
 
   if (existing.length > 0) {
     await db
@@ -38,12 +38,12 @@ router.post("/forwarders/heartbeat", requireAuth, async (req: Request, res: Resp
       .set({
         host: host ?? "unknown",
         version: version ?? "1.0.0",
-        lastHeartbeatAt: new Date(),
+        lastHeartbeatAt: now,
         totalEventsSent: totalEventsSent ?? 0,
         eps: eps ?? 0,
         monitors: (monitors ?? []) as any,
         status: "active",
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(forwardersTable.name, name));
   } else {
@@ -51,8 +51,7 @@ router.post("/forwarders/heartbeat", requireAuth, async (req: Request, res: Resp
       name,
       host: host ?? "unknown",
       version: version ?? "1.0.0",
-      token,
-      lastHeartbeatAt: new Date(),
+      lastHeartbeatAt: now,
       totalEventsSent: totalEventsSent ?? 0,
       eps: eps ?? 0,
       monitors: (monitors ?? []) as any,

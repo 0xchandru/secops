@@ -144,6 +144,8 @@ export class FileTailMonitor {
       const buf = Buffer.alloc(BUFFER_SIZE);
       let remainder = "";
       let currentOffset = offset;
+      // lineSplitter: use sourcetype lineBreaker regex if defined, else newline
+      const lineSplitter = stanza.lineBreaker ? new RegExp(stanza.lineBreaker) : /\n/;
 
       while (currentOffset < stat.size) {
         const bytesToRead = Math.min(BUFFER_SIZE, stat.size - currentOffset);
@@ -151,7 +153,7 @@ export class FileTailMonitor {
         if (bytesRead === 0) break;
 
         const chunk = buf.slice(0, bytesRead).toString("utf-8");
-        const lines = (remainder + chunk).split("\n");
+        const lines = (remainder + chunk).split(lineSplitter);
         remainder = lines.pop() ?? "";
 
         const st = this.stats.get(filePath)!;
@@ -187,9 +189,14 @@ export class FileTailMonitor {
         currentOffset += bytesRead;
       }
 
+      // Commit only up to the last fully-terminated line (not into a partial one).
+      // Subtracting the byte length of the pending remainder ensures the next
+      // poll re-reads those bytes and completes the line when more data arrives.
+      const committedOffset = currentOffset - Buffer.byteLength(remainder, "utf-8");
+
       this.checkpoints.set({
         path: filePath,
-        offset: currentOffset,
+        offset: committedOffset,
         inode: Number(stat.ino),
         size: stat.size,
         eventsSent: this.stats.get(filePath)?.eventsSent ?? 0,

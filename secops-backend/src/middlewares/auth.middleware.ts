@@ -1,6 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
 import { verifyAccessToken, type JwtPayload } from "../lib/jwt";
 import { permissionEngine, type UserContext } from "../lib/permission-engine";
+import { db, apiKeysTable } from "../db";
+import { eq } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 
 declare global {
   namespace Express {
@@ -11,6 +14,65 @@ declare global {
       userContext?: UserContext;
     }
   }
+}
+
+/**
+ * Dual-mode auth middleware for forwarder endpoints.
+ * Accepts either a JWT (session auth) or a prefixed API key (sk_...).
+ * API keys are looked up by prefix, then bcrypt-compared for security.
+ */
+export async function requireAuthOrApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Missing or invalid authorization header" });
+    return;
+  }
+  const token = authHeader.slice(7);
+
+  // 1. Try JWT first (JWTs always contain exactly 2 dots)
+  if (token.split(".").length === 3) {
+    try {
+      const payload = verifyAccessToken(token);
+      req.user = payload;
+      next();
+      return;
+    } catch {
+      // Not a valid JWT, fall through
+    }
+  }
+
+  // 2. Try API key: format sk_<hex> with prefix lookup + bcrypt verify
+  if (token.startsWith("sk_") && token.length > 10) {
+    const prefix = token.slice(0, 10);
+    try {
+      const candidates = await db
+        .select()
+        .from(apiKeysTable)
+        .where(eq(apiKeysTable.keyPrefix, prefix));
+
+      for (const candidate of candidates) {
+        const matches = await bcrypt.compare(token, candidate.keyHash);
+        if (matches) {
+          db.update(apiKeysTable)
+            .set({ lastUsedAt: new Date() })
+            .where(eq(apiKeysTable.id, candidate.id))
+            .catch(() => {});
+          req.user = {
+            userId: candidate.userId,
+            email: "",
+            username: "api-key",
+            role: "api",
+          } as JwtPayload;
+          next();
+          return;
+        }
+      }
+    } catch {
+      // DB lookup failed; fall through to reject
+    }
+  }
+
+  res.status(401).json({ error: "Invalid or expired token" });
 }
 
 /**

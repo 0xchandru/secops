@@ -8,6 +8,7 @@ export interface MonitorStanza {
   ignoreOlderThan?: string;
   whitelistRegex?: string;
   blacklistRegex?: string;
+  lineBreaker?: string;
 }
 
 export interface OutputsConfig {

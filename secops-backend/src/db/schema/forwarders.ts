@@ -5,7 +5,6 @@ export const forwardersTable = pgTable("forwarders", {
   name: text("name").notNull(),
   host: text("host").notNull(),
   version: text("version").notNull().default("1.0.0"),
-  token: text("token").notNull(),
   lastHeartbeatAt: timestamp("last_heartbeat_at").defaultNow(),
   totalEventsSent: integer("total_events_sent").notNull().default(0),
   eps: real("eps").notNull().default(0),
