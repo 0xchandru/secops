@@ -1,405 +1,327 @@
 # SecOps Console
 
-SecOps Console is a full-stack mini-SIEM and SOC analyst workspace. It ingests security logs, normalizes them through a parser registry, enriches events with asset and GeoIP context, evaluates custom detection rules, and streams alerts into a real-time triage UI.
+<div align="center">
 
-The project is designed as a production-grade security engineering portfolio: it demonstrates log ingestion, detection engineering, alert lifecycle management, RBAC, auditability, and analyst-facing investigation workflows in one cohesive application.
+![SecOps Console](https://img.shields.io/badge/SecOps-Console-0f172a?style=for-the-badge&logo=shield&logoColor=22d3ee)
+&nbsp;
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?style=for-the-badge&logo=typescript&logoColor=white)
+&nbsp;
+![React](https://img.shields.io/badge/React-19-61dafb?style=for-the-badge&logo=react&logoColor=black)
+&nbsp;
+![Node.js](https://img.shields.io/badge/Node.js-22-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
+&nbsp;
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791?style=for-the-badge&logo=postgresql&logoColor=white)
+&nbsp;
+![Redis](https://img.shields.io/badge/Redis-7-dc382d?style=for-the-badge&logo=redis&logoColor=white)
 
-## Highlights
+**A production-grade mini-SIEM and SOC analyst workspace built for detection engineering, real-time triage, and security operations workflows.**
 
-- Real-time log ingestion through HTTP endpoints and optional syslog receiver
-- Parser registry for Syslog, Windows EventLog, Firewall, CEF, ECS JSON, LEEF, CloudTrail, DNS, VPC Flow, and Apache/Nginx-style web logs
-- Custom detection engine with simple, threshold, and sequence rules
-- 15 seeded MITRE-mapped detection rules for brute force, PowerShell abuse, PsExec-style lateral movement, Kerberoasting, credential dumping, suspicious DNS, CloudTrail root usage, and related scenarios
-- Redis Streams pipeline with consumer groups, batch processing, retries, and dead-letter handling
-- Event enrichment with source/destination GeoIP, asset criticality, and 0-100 risk scoring
-- SPL-like log search with field aliases, comparison operators, wildcard matching, boolean logic, and free-text search
-- SOC workflow for alert queueing, assignment, investigation, escalation, resolution, related events, timeline notes, and bulk updates
-- Database-backed RBAC model with roles, permissions, user-role assignments, effective priority, and cached authorization context
-- Audit logging for security-relevant actions
-- React analyst console with dashboard, alerts, log explorer, rule builder, MITRE view, assets, audit logs, users, settings, and notifications
+[Live Demo](#local-development) · [Architecture](ARCHITECTURE.md) · [API Reference](#api-surface) · [Detection Rules](#detection-engine)
+
+</div>
+
+---
+
+## What Is SecOps Console?
+
+SecOps Console ingests raw security logs from any source, normalises them through a pluggable parser registry, enriches events with GeoIP and asset context, evaluates 15 pre-built MITRE-mapped detection rules through a custom correlation engine, and streams alerts into a real-time analyst UI — all in one cohesive, self-hosted application.
+
+```
+Raw Logs (syslog / Windows / CEF / CloudTrail…)
+        │
+        ▼
+  Parser Registry  ──►  Normalised Event  ──►  Enrichment (GeoIP + Asset)
+        │                                              │
+        ▼                                              ▼
+  Redis Streams ──►  Detection Engine  ──►  Alert  ──►  WebSocket ──►  Analyst UI
+```
+
+---
+
+## Feature Highlights
+
+| Area | What's Built |
+|---|---|
+| **Log Ingestion** | HTTP single / bulk / raw-text endpoints + optional UDP/TCP syslog receiver on port 1514 |
+| **Parser Registry** | 9 formats: Syslog (20+ programs), Windows EventLog (40+ EventIDs + Sysmon), Firewall, CEF, ECS JSON, LEEF, CloudTrail, DNS, generic — each extracting 50+ normalised fields |
+| **Detection Engine** | `simple`, `threshold`, and `sequence` rule types; 12 field modifiers (`contains`, `any`, `gt`, `lt`, `cidr`, `exists`, `not`, `re`, `startswith`, `endswith`, `gte`, `lte`); pre-filter index; alert dedup; rule-level rate limiting |
+| **Seeded Rules** | 15 production rules covering brute force, PowerShell abuse, lateral movement, Kerberoasting, credential dumping, DNS tunnelling, CloudTrail root usage, and more |
+| **SPL-like Search** | Splunk-style query language with field aliases, comparison operators, wildcard matching, boolean logic, pipe operators, and free-text search |
+| **Threat Enrichment** | Dual GeoIP (src + dst IP), asset criticality lookup, 0–100 risk scoring across 6 factors, IOC extraction, ThreatLens enrichment pipeline |
+| **SOC Workflow** | Alert queue → investigate → assign → escalate → resolve; timeline notes; bulk actions; related events; investigation checklist |
+| **RBAC** | 6 roles (admin, senior analyst, analyst, tier1, read-only viewer, auditor); database-driven permission matrix; Redis-cached auth context; audit log on every action |
+| **Real-time** | WebSocket streams for alerts, live events, and notifications; Redis Pub/Sub for cross-process broadcast |
+| **Rule Builder** | Visual condition editor with live Sigma YAML preview, MITRE ATT&CK picker (~200 techniques across 14 tactics), test endpoint |
+| **Dashboard** | Alert trends, EPS gauge, MITRE coverage ring, MTTR, top targeted hosts, time-range selector, drill-through stat cards |
+| **Scheduled SPL Alerts** | Save any SPL query as a recurring alert rule; scheduler runs every minute and fires alerts when threshold is crossed |
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
-| --- | --- |
-| Frontend | React 19, TypeScript, Vite 7, TanStack React Query, Zustand, Radix UI, Recharts, Tailwind CSS |
+|---|---|
+| Frontend | React 19, TypeScript 5, Vite 7, TanStack React Query v5, Zustand, Radix UI, Recharts, Tailwind CSS v4 |
 | Backend | Node.js 22, Express 5, TypeScript, Drizzle ORM, esbuild, Zod |
-| Data | PostgreSQL, Redis 7 |
-| Realtime | WebSocket, Redis Pub/Sub |
-| Pipeline | Redis Streams, background worker, syslog receiver |
-| Security | JWT access/refresh tokens, bcrypt, RBAC middleware, audit log |
-| Packaging | Dockerfiles and Docker Compose topology |
+| Database | PostgreSQL 15+ |
+| Cache / Streams | Redis 7 (Streams, Pub/Sub, cache) |
+| Real-time | WebSocket (ws), Redis Pub/Sub |
+| Auth | JWT access + refresh tokens, bcrypt, express-rate-limit |
+| Infra | Docker + Docker Compose, node-cron scheduler, optional syslog receiver |
 
-## Architecture
+---
 
-```text
-React/Vite Analyst Console
-  | HTTP /api
-  | WebSocket /ws/alerts, /ws/events/live, /ws/notifications
-  v
-Express API Server
-  | Auth, RBAC, routes, audit logging
-  | Parser registry
-  | Enrichment
-  | Detection engine
-  v
-PostgreSQL
-  | users, roles, permissions, rules, raw_logs, alerts, assets, audit_logs, notifications
+## Repository Layout
 
-Redis
-  | Streams: async log pipeline
-  | Pub/Sub: cross-process alert and event broadcast
-  | Cache: permissions, assets, dashboard data
-
-Optional Runtime Processes
-  | Pipeline worker
-  | UDP/TCP syslog receiver on 1514
+```
+secops/
+├── secops-backend/
+│   ├── src/
+│   │   ├── db/schema/          # Drizzle ORM schema (15 tables)
+│   │   ├── lib/
+│   │   │   ├── parsers/        # 9 log format parsers
+│   │   │   ├── detection/      # Engine + 15 seeded rules
+│   │   │   ├── search/         # SPL parser + executor
+│   │   │   ├── enrichment.ts   # GeoIP, asset, risk scoring
+│   │   │   ├── scheduler.ts    # node-cron task runner
+│   │   │   └── redis.ts        # Streams + Pub/Sub helpers
+│   │   ├── modules/            # Express route modules (auth, alerts, rules, …)
+│   │   ├── receivers/          # UDP + TCP syslog receiver
+│   │   └── workers/            # Redis Streams consumer group
+│   └── scripts/                # DB setup + user seed scripts
+├── secops-frontend/
+│   ├── src/
+│   │   ├── pages/              # 15 application views
+│   │   ├── components/         # Layout, widgets, Radix UI wrappers
+│   │   ├── lib/                # API client, SPL helpers, MITRE taxonomy
+│   │   └── store/              # Zustand auth + UI state
+├── sample-logs/                # Alert-triggering sample log files
+├── docker-compose.yml
+└── README.md
 ```
 
-The deeper design notes, rule DSL, parser internals, database model, SOC workflow, and roadmap are documented in [ARCHITECTURE.md](ARCHITECTURE.md).
+---
 
-## Repository Structure
+## Demo Credentials
 
-```text
-.
-|-- ARCHITECTURE.md              # Detailed architecture and roadmap
-|-- README.md                    # Project overview and setup
-|-- docker-compose.yml           # Production-style service topology
-|-- sample-logs/                 # Alert-generating sample logs
-|-- secops-backend/              # Express API, pipeline, parsers, detection engine
-|   |-- src/db/schema/           # Drizzle schema
-|   |-- src/lib/parsers/         # Log parser plugins
-|   |-- src/lib/detection/       # Detection engine and seed rules
-|   |-- src/modules/             # API modules
-|   |-- src/receivers/           # Syslog receiver
-|   `-- src/workers/             # Redis Streams worker
-`-- secops-frontend/             # React analyst console
-    |-- src/pages/               # Application views
-    |-- src/components/          # Layout, widgets, UI components
-    |-- src/hooks/               # WebSocket and UI hooks
-    |-- src/lib/                 # API client, types, utilities
-    `-- src/store/               # Client state
-```
+> Seeded automatically on first startup — no manual SQL required.
 
-## Core Capabilities
+| Username | Password | Role | Access |
+|---|---|---|---|
+| `admin` | `Admin@123` | Administrator | Full access — users, roles, rules, settings |
+| `senior_analyst` | `Analyst@123` | Senior Analyst | Alerts, rules, escalation, user management |
+| `analyst` | `Analyst@123` | Analyst | Alerts, rules, logs, enrichment |
+| `tier1` | `Tier1@123` | Tier-1 SOC | Alert triage, view only for rules |
+| `readonly` | `Readonly@123` | Read-Only | View everything, change nothing |
+| `auditor` | `Auditor@123` | Auditor | Alerts + audit logs read |
 
-### Log Ingestion and Normalization
-
-The backend accepts logs through:
-
-- `POST /api/ingest-log` for a single structured/raw event
-- `POST /api/ingest/bulk` for batch ingestion
-- `POST /api/ingest/raw` for pasted or piped raw text
-- Optional UDP/TCP syslog receiver on port `1514`
-
-Logs are normalized into a broad event model covering network, host, user, process, HTTP, DNS, file, registry, vendor, syslog, enrichment, and timestamp fields.
-
-### Detection Engine
-
-Rules support:
-
-- `simple` one-event matching
-- `threshold` sliding-window counts by a chosen field
-- `sequence` ordered multi-step correlation
-- Field modifiers such as `contains`, `any`, `re`, `gt`, `gte`, `lt`, `lte`, `cidr`, `exists`, and `not`
-- Alert deduplication and rule-level rate limiting
-- MITRE ATT&CK mapping and alert context templates
-
-Example rule shape:
-
-```yaml
-name: Suspicious PowerShell Execution
-description: PowerShell with suspicious download or obfuscation patterns
-severity: high
-type: simple
-match:
-  processCommandLine|contains|any:
-    - "DownloadString"
-    - "IEX"
-    - "-EncodedCommand"
-mitre:
-  tactic: Execution
-  technique_id: T1059.001
-  technique_name: "Command and Scripting Interpreter: PowerShell"
-alert:
-  title_template: "Suspicious PowerShell on {sourceHost} by {userName}"
-  context_fields: [processCommandLine, userName, sourceHost]
-tags: [powershell, execution]
-```
-
-### Analyst Workflow
-
-The frontend provides:
-
-- Dashboard with alert counts, trends, EPS, MITRE coverage, MTTR, and top targeted hosts
-- Alert queue with filtering, grouping, assignment, bulk actions, and live updates
-- Alert detail with timeline, status transitions, escalation, related events, IOC extraction, and investigation checklist
-- Log explorer with SPL-like search, filters, facets, histogram, customizable columns, CSV export, and live tail
-- Detection rules and rule builder with YAML preview, MITRE picker, test endpoint, and enable/disable flow
-- MITRE ATT&CK heatmap for rule coverage
-- Assets, audit logs, users, roles, settings, notifications, and API key screens
-
-### Security and Governance
-
-- JWT access tokens and refresh tokens
-- Password hashing with bcrypt
-- Login rate limiting and failed-attempt lockout
-- Legacy role checks plus database-driven permissions
-- Multi-role assignment with effective priority
-- Redis-cached authorization context
-- Alert state transition history and escalation tracking
-- Audit logs for auth, alert, rule, user, role, settings, and API key activity
-
-## Prerequisites
-
-- Node.js 22+
-- npm 10+
-- PostgreSQL 15+ recommended
-- Redis 7+
-- Docker and Docker Compose, optional but useful for local infrastructure
-
-There is no root package manifest. Install backend and frontend dependencies separately.
+---
 
 ## Local Development
 
-### 1. Start PostgreSQL and Redis
+### Prerequisites
 
-You can use the Compose file for infrastructure only:
+- Node.js 22+
+- PostgreSQL 15+
+- Redis 7+
+- (Optional) Docker + Docker Compose for infra
+
+### 1 — Start infrastructure
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-This exposes PostgreSQL on `localhost:5432` and Redis on `localhost:6379` using the defaults from `.env.example`.
+Exposes PostgreSQL on `localhost:5432` and Redis on `localhost:6379`.
 
-### 2. Configure the backend
-
-Create `secops-backend/.env`:
+### 2 — Configure the backend
 
 ```bash
+cp secops-backend/.env.example secops-backend/.env
+# Edit secops-backend/.env if needed (defaults work with docker compose)
+```
+
+Key variables:
+
+```env
 PORT=8080
-NODE_ENV=development
 DATABASE_URL=postgresql://secops:secops_pass@localhost:5432/secops
 REDIS_URL=redis://localhost:6379
-JWT_SECRET=replace-with-a-long-random-string
-JWT_REFRESH_SECRET=replace-with-a-different-long-random-string
+JWT_SECRET=replace-me
+JWT_REFRESH_SECRET=replace-me-too
 ENABLE_WORKER=true
 ENABLE_SYSLOG=false
-SYSLOG_UDP_PORT=1514
-SYSLOG_TCP_PORT=1514
 ```
 
-Install dependencies, create/update the schema, build, and start:
+### 3 — Build and start the backend
 
 ```bash
 cd secops-backend
 npm install
-DATABASE_URL=postgresql://secops:secops_pass@localhost:5432/secops npm run db:push
+npm run db:push        # applies schema via drizzle-kit
 npm run build
-npm run dev
+npm run dev            # auto-seeds demo users on first start
 ```
 
-The backend listens on `http://localhost:8080`.
+Backend listens on `http://localhost:8080`.
 
-### 3. Start the frontend
-
-In a second terminal:
+### 4 — Start the frontend
 
 ```bash
 cd secops-frontend
 npm install
-npm run dev
+npm run dev            # Vite dev server on http://localhost:5173
 ```
 
-The frontend listens on `http://localhost:5173` and proxies `/api` plus `/ws` to the backend.
+The Vite proxy forwards `/api` and `/ws` to the backend automatically.
 
-### 4. Create the first user
-
-The API protects user creation behind admin authorization, so a fresh database needs an initial user seed before login. The backend `package.json` contains seed script names, but the corresponding `secops-backend/scripts/` directory is not present in this checkout.
-
-Use your preferred database seed workflow to insert the first admin user, or restore the seed scripts before running:
+### 5 — Ingest sample logs
 
 ```bash
-npm run seed:roles
-npm run seed:admin
-```
-
-After login, use the User Management and Roles screens to create additional users and assign permissions.
-
-## Useful Commands
-
-Backend:
-
-```bash
-cd secops-backend
-npm run build
-npm run dev
-npm run start
-npm run typecheck
-npm run db:push
-```
-
-Frontend:
-
-```bash
-cd secops-frontend
-npm run dev
-npm run build
-npm run preview
-npm run typecheck
-```
-
-Infrastructure:
-
-```bash
-docker compose up -d postgres redis
-docker compose logs -f postgres redis
-docker compose down
-```
-
-## API Surface
-
-All REST endpoints are mounted under `/api`.
-
-| Area | Endpoints |
-| --- | --- |
-| Health | `GET /healthz` |
-| Auth | `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me` |
-| Profile | `GET/PATCH /me`, `POST /me/password`, `GET/PATCH /me/settings`, API key CRUD |
-| Users | User CRUD, password reset, escalation targets, user-role assignment |
-| Roles | Role CRUD, permission catalog, role permission assignment |
-| Alerts | List/detail, investigate, status update, assign, escalate, timeline notes, related events, bulk update, action endpoints |
-| Rules | List/detail, create, update, delete, toggle, test, stats |
-| Logs | Search logs, filter metadata, facets, event histogram, host context |
-| Ingest | Single, bulk, raw text, pending, stats, reprocess, manual detections |
-| Dashboard | `GET /dashboard/stats` |
-| Assets | Asset CRUD and hostname/IP lookup |
-| Audit | `GET /audit` |
-| Notifications | List, mark read, mark all read, delete |
-
-WebSocket endpoints:
-
-| Channel | Path |
-| --- | --- |
-| Alerts | `/ws/alerts` |
-| Live events | `/ws/events/live` |
-| Notifications | `/ws/notifications` |
-
-## Sample Logs
-
-The [sample-logs](sample-logs) directory contains raw events for exercising detections across Windows EventLog, syslog, firewall, DNS, VPC Flow, and CloudTrail formats.
-
-Example raw ingest:
-
-```bash
-curl -X POST "http://localhost:8080/api/ingest/raw?source=syslog" \
+# Ingest a full syslog sample (triggers brute-force + lateral movement rules)
+curl -X POST http://localhost:8080/api/ingest/raw?source=syslog \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <access_token>" \
-  -d '{"text":"<paste log file contents here>"}'
+  -H "Authorization: Bearer <your_access_token>" \
+  -d '{"text":"<paste contents of sample-logs/syslog-sample.txt>"}'
 ```
 
-Example bulk ingest:
+See [sample-logs/README.md](sample-logs/README.md) for the rule-to-file mapping.
 
-```bash
-curl -X POST "http://localhost:8080/api/ingest/bulk" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <access_token>" \
-  -d '{"logs":[{"source":"windows_eventlog","message":"<raw event>"}]}'
+---
+
+## SPL Search Examples
+
+The log explorer accepts plain text and SPL-style queries:
+
 ```
-
-Threshold and sequence rules require enough events, in the right order, to cross the configured window. See [sample-logs/README.md](sample-logs/README.md) for the rule-to-file mapping.
-
-## Search Examples
-
-The log explorer accepts plain text and SPL-like queries:
-
-```text
 failed login
 severity=critical OR severity=high
 src_ip=10.0.0.5 AND action=login_failure
 risk_score>=75
 process=powershell* AND NOT user=svc*
 dns_query=*malware*
+src_country=RU AND action=login_success
 ```
 
-Common aliases include `src`, `src_ip`, `dst`, `dst_ip`, `host`, `user`, `process`, `cmd`, `risk`, `country`, `status_code`, and `dns_query`.
+Common field aliases: `src`, `src_ip`, `dst`, `dst_ip`, `host`, `user`, `process`, `cmd`, `risk`, `country`, `status_code`, `dns_query`.
+
+---
+
+## Detection Engine
+
+Rules are stored as Sigma-compatible YAML. The engine evaluates every ingested event against enabled rules in real time.
+
+```yaml
+name: Suspicious PowerShell Execution
+description: 'PowerShell with suspicious download or obfuscation patterns'
+severity: high
+type: simple
+logsource:
+  category: windows
+  product: '*'
+detection:
+  selection:
+    processCommandLine|contains|any:
+      - "DownloadString"
+      - "IEX"
+      - "-EncodedCommand"
+  condition: selection
+mitre:
+  tactic: Execution
+  technique_id: T1059.001
+```
+
+### Rule Types
+
+| Type | How It Works |
+|---|---|
+| `simple` | Single-event field match with modifiers |
+| `threshold` | N events matching a field within a time window |
+| `sequence` | Ordered multi-step correlation across events |
+| `spl_saved_search` | Scheduled SPL query; fires when result count ≥ threshold |
+
+### Field Modifiers
+
+`contains` · `any` · `re` (regex) · `gt` · `gte` · `lt` · `lte` · `cidr` · `exists` · `not` · `startswith` · `endswith`
+
+---
+
+## API Surface
+
+All endpoints are mounted under `/api`.
+
+| Area | Endpoints |
+|---|---|
+| Health | `GET /healthz` |
+| Auth | `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `GET /auth/me` |
+| Profile | `GET/PATCH /me` · `POST /me/password` · API key CRUD |
+| Alerts | List · detail · investigate · assign · escalate · resolve · timeline notes · related events · bulk update |
+| Rules | List · detail · create · update · delete · toggle · test · stats |
+| Logs | Search · filter metadata · facets · histogram · host context |
+| Ingest | `POST /ingest-log` · `/ingest/bulk` · `/ingest/raw` · pending · reprocess |
+| Enrichment | `GET /enrichment/ip/:ip` · `/enrichment/domain/:domain` · ThreatLens report |
+| Dashboard | `GET /dashboard/stats` |
+| Assets | Asset CRUD + hostname/IP lookup |
+| Audit | `GET /audit` |
+| Notifications | List · mark read · delete |
+
+WebSocket channels: `/ws/alerts` · `/ws/events/live` · `/ws/notifications`
+
+---
 
 ## Environment Variables
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `PORT` | Yes | Backend HTTP port |
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `REDIS_URL` | No | Redis connection string, defaults to `redis://localhost:6379` |
-| `JWT_SECRET` | Yes | Access token signing secret |
-| `JWT_REFRESH_SECRET` | Yes | Refresh token signing secret |
-| `NODE_ENV` | No | `development` or `production` |
-| `ENABLE_WORKER` | No | Start inline Redis Streams worker when `true` |
-| `ENABLE_SYSLOG` | No | Start UDP/TCP syslog receiver when `true` |
-| `SYSLOG_UDP_PORT` | No | UDP syslog port, defaults to `1514` |
-| `SYSLOG_TCP_PORT` | No | TCP syslog port, defaults to `1514` |
-| `LOG_LEVEL` | No | Pino log level |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PORT` | Yes | `8080` | Backend HTTP port |
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `REDIS_URL` | No | `redis://localhost:6379` | Redis connection string |
+| `JWT_SECRET` | Yes | — | Access token signing key |
+| `JWT_REFRESH_SECRET` | Yes | — | Refresh token signing key |
+| `NODE_ENV` | No | `development` | `development` or `production` |
+| `ENABLE_WORKER` | No | `false` | Start inline Redis Streams worker |
+| `ENABLE_SYSLOG` | No | `false` | Start UDP/TCP syslog receiver |
+| `SYSLOG_UDP_PORT` | No | `1514` | UDP syslog port |
+| `SYSLOG_TCP_PORT` | No | `1514` | TCP syslog port |
+| `LOG_LEVEL` | No | `info` | Pino log level |
 
-The root `.env.example` is Docker-oriented. For local backend development, prefer `secops-backend/.env` with `localhost` database and Redis hosts.
+---
 
-## Docker Topology
+## Docker Deployment
 
-`docker-compose.yml` defines:
+```bash
+docker compose up -d
+```
 
-- PostgreSQL
-- Redis
-- API server
-- Pipeline worker
-- Syslog receiver
-- Nginx-served frontend
+`docker-compose.yml` runs: PostgreSQL · Redis · API server · Pipeline worker · Syslog receiver · Nginx-served frontend.
 
-The Compose topology is useful as a deployment reference. In this checkout, the backend Dockerfile references a `scripts/` directory that is not committed, so validate the Docker build after restoring or removing that copy step.
+---
 
-## Database Overview
+## Useful Commands
 
-Primary tables:
+```bash
+# Backend
+cd secops-backend
+npm run dev            # development with ts-node-dev
+npm run build          # esbuild production bundle
+npm run typecheck      # tsc --noEmit
+npm run db:push        # push schema via drizzle-kit
 
-- `users`, `roles`, `permissions`, `role_permissions`, `user_roles`
-- `raw_logs`
-- `rules`
-- `alerts`, `alert_timeline`, `alert_state_transitions`, `escalation_history`
-- `assets`
-- `audit_logs`
-- `notifications`
-- `api_keys`
-- `incidents`
+# Frontend
+cd secops-frontend
+npm run dev            # Vite dev server
+npm run build          # production bundle
+npm run typecheck      # tsc --noEmit
+```
 
-`raw_logs` is the central event table and includes indexes on timestamp, severity, category, source, source/destination IP, hostname, username, event type, action, and processed state.
+---
 
-## Current Roadmap
+## Architecture
 
-Implemented foundation:
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a comprehensive breakdown of the detection engine internals, log parser registry, database schema, SOC workflow state machine, Redis pipeline design, RBAC model, and enrichment pipeline.
 
-- Parser registry and normalized event model
-- Detection engine with three rule types
-- Seeded detection rules
-- Enrichment and risk scoring
-- SPL-like log search
-- Alert lifecycle workflow
-- RBAC, audit logging, notifications, assets, dashboard, and analyst UI
-
-High-value next steps:
-
-- Threat intelligence enrichment for IPs, domains, hashes, and URLs
-- Playbook/SOP rendering from rule YAML
-- SLA timers and shift handoff reports
-- Incident workflow on top of grouped alerts
-- Parser health metrics
-- Sigma conversion service using Python and pySigma
-- UEBA/anomaly detection service using Python analytics
-
-## Project Status Notes
-
-- `ARCHITECTURE.md` is both architecture documentation and roadmap. Some sections describe target-state features that are not yet implemented.
-- The current backend seeds detection rules automatically on startup, but initial user/role seed scripts referenced by `package.json` are not present in this checkout.
-- `sample-logs/README.md` mentions a few web log samples that are not currently present in the directory.
-- API key storage exists and keys can be created from the profile area; scope enforcement should be completed before treating API keys as a production integration boundary.
+---
 
 ## License
 
-No license file is currently included. Add a license before publishing or accepting external contributions.
+MIT — see [LICENSE](LICENSE) for details.

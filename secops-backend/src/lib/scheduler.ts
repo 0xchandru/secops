@@ -13,6 +13,7 @@ import yaml from "js-yaml";
 const tasks: ReturnType<typeof cron.schedule>[] = [];
 
 const INTERVAL_MS: Record<string, number> = {
+  "1m": 60_000,
   "5m": 5 * 60_000,
   "15m": 15 * 60_000,
   "1h": 60 * 60_000,

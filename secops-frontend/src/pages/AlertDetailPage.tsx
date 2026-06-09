@@ -213,13 +213,13 @@ export default function AlertDetailPage() {
   };
 
   const assignMutation = {
-    mutate: (userId: string) => actionMutation.mutate({ action: 'assign', payload: { assignedTo: userId } }),
+    mutate: (userId: string) => actionMutation.mutate({ action: 'assign', payload: { assignTo: userId } }),
     isPending: actionMutation.isPending,
   };
 
   const noteMutation = {
     mutate: (content: string) => {
-      actionMutation.mutate({ action: 'add_note', payload: { content, type: 'note' } });
+      actionMutation.mutate({ action: 'add_note', payload: { noteContent: content } });
       setNote('');
     },
     isPending: actionMutation.isPending,

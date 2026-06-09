@@ -62,6 +62,17 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const [wsAlertToast, setWsAlertToast] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const wsReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try { return localStorage.getItem('sidebarOpen') !== 'false'; } catch { return true; }
+  });
+
+  const toggleSidebar = () => {
+    setSidebarOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem('sidebarOpen', String(next)); } catch { }
+      return next;
+    });
+  };
 
   const { data: newAlertsCount = 0 } = useQuery({
     queryKey: ['alerts-count', 'new'],
@@ -108,24 +119,22 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
-      {/*
-        ── Hover-expand sidebar ────────────────────────────────────────────
-        w-14 collapsed → w-56 on hover. Inner content is always at min-w-56
-        so labels simply get revealed by the sidebar expanding (overflow-hidden
-        clips them when collapsed).
-      */}
       <aside
-        className="group/sidebar shrink-0 border-r border-border bg-sidebar flex flex-col z-20 overflow-hidden transition-[width] duration-200 ease-out w-14 hover:w-56"
+        className={`shrink-0 border-r border-border bg-sidebar flex flex-col z-30 overflow-hidden transition-[width] duration-200 ease-out ${sidebarOpen ? 'w-56' : 'w-14'}`}
         style={{ willChange: 'width' }}
       >
         {/* Fixed-width inner wrapper — always 224px, clipped by aside overflow */}
         <div className="w-56 flex flex-col flex-1">
-          {/* Logo */}
-          <div className="h-14 flex items-center shrink-0 px-3 gap-3 border-b border-border">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0">
+          {/* Logo + toggle */}
+          <div className="h-14 flex items-center shrink-0 px-3 gap-2 border-b border-border">
+            <button
+              onClick={toggleSidebar}
+              className="w-8 h-8 rounded-lg bg-primary/20 border border-primary/30 flex items-center justify-center shrink-0 hover:bg-primary/30 transition-colors"
+              title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            >
               <Shield className="w-4 h-4 text-primary" />
-            </div>
-            <div className="min-w-0">
+            </button>
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-foreground whitespace-nowrap leading-tight">SecOps Console</p>
               <p className="text-[10px] text-slate-500 whitespace-nowrap">Security Operations</p>
             </div>

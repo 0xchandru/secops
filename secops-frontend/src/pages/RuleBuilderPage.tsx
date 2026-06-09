@@ -116,6 +116,9 @@ export default function RuleBuilderPage() {
   const [testing, setTesting] = useState(false);
   const [saved, setSaved] = useState(false);
   const [initialized, setInitialized] = useState(!isEditMode);
+  const [stableId] = useState(() => uuidv4());
+  const [existingRuleId, setExistingRuleId] = useState<string | null>(null);
+  const [conditionsEdited, setConditionsEdited] = useState(false);
 
   const { data: existingRule, isLoading: loadingRule } = useQuery({
     queryKey: ['rule', ruleId],
@@ -130,6 +133,7 @@ export default function RuleBuilderPage() {
       setDesc(rule.description ?? '');
       setSeverity(rule.severity ?? 'medium');
       setLogSource(rule.logSource ?? rule.log_source ?? 'windows');
+      if (rule.id) setExistingRuleId(rule.id);
       const mitreIds: string[] = rule.mitreIds ?? rule.mitre_ids ?? [];
       setSelectedMitre(mitreIds.map((id: string) => {
         const found = ALL_TECHNIQUES.find(t => t.id === id || t.label.startsWith(id));
@@ -145,9 +149,6 @@ export default function RuleBuilderPage() {
         });
         const hasAny = (ex.ips?.length || ex.cidrs?.length || ex.hostnames?.length || ex.usernames?.length);
         if (hasAny) setShowExceptions(true);
-      }
-      if (rule.yamlContent || rule.yaml_content || rule.yaml) {
-        setConditions([{ id: uuidv4(), field: 'event.type', operator: '==', value: '' }]);
       }
       setInitialized(true);
     }
@@ -165,19 +166,23 @@ export default function RuleBuilderPage() {
     })).filter(t => t.techniques.length > 0);
   }, [mitreSearch]);
 
-  const addCondition = () => setConditions(prev => [...prev, { id: uuidv4(), field: '', operator: '==', value: '' }]);
-  const removeCondition = (id: string) => setConditions(prev => prev.filter(c => c.id !== id));
-  const updateCondition = (id: string, key: string, val: string) =>
+  const addCondition = () => { setConditionsEdited(true); setConditions(prev => [...prev, { id: uuidv4(), field: '', operator: '==', value: '' }]); };
+  const removeCondition = (id: string) => { setConditionsEdited(true); setConditions(prev => prev.filter(c => c.id !== id)); };
+  const updateCondition = (id: string, key: string, val: string) => {
+    setConditionsEdited(true);
     setConditions(prev => prev.map(c => c.id === id ? { ...c, [key]: val } : c));
+  };
 
   const toggleMitre = (t: string) =>
     setSelectedMitre(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
 
   const totalExceptions = exceptions.ips.length + exceptions.cidrs.length + exceptions.hostnames.length + exceptions.usernames.length;
 
+  const yamlId = existingRuleId ?? stableId;
+  const safeDesc = (desc || 'No description').replace(/'/g, "''");
   const generatedYaml = `title: ${name || 'New Rule'}
-id: ${uuidv4()}
-description: ${desc || 'No description'}
+id: ${yamlId}
+description: '${safeDesc}'
 status: experimental
 author: Detection Team
 date: ${new Date().toISOString().split('T')[0]}
@@ -186,7 +191,7 @@ logsource:
   product: '*'
 detection:
   selection:
-${conditions.filter(c => c.field && c.value).map(c => `    ${c.field}${c.operator === 'contains' ? '|contains' : c.operator === 'regex' ? '|re' : ''}: '${c.value}'`).join('\n') || '    event.type: \'*\''}
+${conditions.filter(c => c.field && c.value).map(c => `    ${c.field}${c.operator === 'contains' ? '|contains' : c.operator === 'regex' ? '|re' : ''}: '${c.value.replace(/'/g, "''")}'`).join('\n') || "    event.type: '*'"}
   condition: selection
 falsepositives:
   - Legitimate administrative activity
@@ -586,15 +591,27 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
 
           {/* YAML Preview */}
           <div className="bg-[#050810] border border-border rounded-xl shadow-lg flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-border bg-card/50 flex justify-between items-center">
+            <div className="p-4 border-b border-border bg-card/50 flex justify-between items-center gap-2">
               <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
-                <Code className="w-4 h-4 text-primary" /> Live Sigma YAML Preview
+                <Code className="w-4 h-4 text-primary" />
+                {isEditMode && !conditionsEdited ? 'Saved Rule YAML' : 'Live Sigma YAML Preview'}
               </h3>
-              <span className="text-xs text-muted-foreground font-mono">{generatedYaml.split('\n').length} lines</span>
+              <div className="flex items-center gap-2">
+                {isEditMode && !conditionsEdited && (existingRule?.rule?.yamlContent ?? existingRule?.yamlContent) && (
+                  <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
+                    Edit conditions to regenerate
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground font-mono">
+                  {(isEditMode && !conditionsEdited ? (existingRule?.rule?.yamlContent ?? existingRule?.yamlContent ?? generatedYaml) : generatedYaml).split('\n').length} lines
+                </span>
+              </div>
             </div>
             <div className="p-5 flex-1 overflow-auto">
               <pre className="text-sm font-mono text-green-400 leading-relaxed whitespace-pre-wrap">
-                {generatedYaml}
+                {isEditMode && !conditionsEdited
+                  ? (existingRule?.rule?.yamlContent ?? existingRule?.yamlContent ?? generatedYaml)
+                  : generatedYaml}
               </pre>
             </div>
           </div>
