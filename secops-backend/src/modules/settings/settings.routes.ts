@@ -4,16 +4,16 @@ import { requireAuth } from "../../middlewares/auth.middleware";
 import { can } from "../../middlewares/rbac.middleware";
 import { db, systemSettingsTable } from "../../db";
 import { eq } from "drizzle-orm";
+import { setSecret, getSecret } from "../../lib/replit-secrets";
 import { sendEmail, sendSlack, getEmailConfig, getSlackConfig, getThreatLensConfig } from "../../lib/notification-service";
 import nodemailer from "nodemailer";
 
 const router = Router();
 
-// Sensitive values are stored ONLY in process.env (Replit secrets store),
-// never in the database. The PATCH endpoint sets process.env at runtime —
-// changes persist for the current server session. For permanent storage,
-// set the corresponding Replit Secret: SMTP_PASSWORD, SLACK_WEBHOOK_URL,
-// THREATLENS_API_KEY.
+// Sensitive values are stored in Replit DB (persists across restarts) and
+// synced into process.env on load.  The env var names are:
+//   SMTP_PASSWORD, SLACK_WEBHOOK_URL, THREATLENS_API_KEY
+// Non-sensitive config lives in the system_settings PostgreSQL table.
 
 const SENSITIVE_ENV_MAP: Record<string, string> = {
   "notifications.email.password": "SMTP_PASSWORD",
@@ -59,7 +59,9 @@ async function readDbSetting(key: string): Promise<string | null> {
   return row[0]?.value ?? null;
 }
 
-// GET /api/settings/system — returns DB settings + env-var status for secrets
+// GET /api/settings/system
+// Returns non-sensitive settings from DB and a configured/not-configured
+// indicator for each secret (never the secret value itself).
 router.get("/settings/system", requireAuth, can("users:manage"), async (_req: Request, res: Response) => {
   const rows = await db.select().from(systemSettingsTable);
   const settings: Record<string, string> = {};
@@ -69,33 +71,39 @@ router.get("/settings/system", requireAuth, can("users:manage"), async (_req: Re
     settings[row.key] = row.value;
   }
 
-  // For sensitive keys, return whether the env var is currently set (not the value)
-  for (const [settingKey, envVar] of Object.entries(SENSITIVE_ENV_MAP)) {
-    settings[settingKey] = process.env[envVar] ? "••••••••" : "";
-  }
+  // For secrets, return a masked sentinel if set — never the actual value
+  await Promise.all(
+    Object.entries(SENSITIVE_ENV_MAP).map(async ([settingKey, envVar]) => {
+      const val = await getSecret(envVar);
+      settings[settingKey] = val ? "••••••••" : "";
+    })
+  );
 
   res.json({ settings });
 });
 
-// PATCH /api/settings/system — saves non-sensitive to DB; sensitive to process.env
+// PATCH /api/settings/system
+// Saves non-sensitive values to PostgreSQL and persists sensitive values to
+// Replit DB (durable across restarts) + process.env.
 router.patch("/settings/system", requireAuth, can("users:manage"), async (req: Request, res: Response) => {
   const updates = req.body as Record<string, string>;
   const userId = req.user!.userId;
 
-  for (const [key, value] of Object.entries(updates)) {
-    if (!ALL_ALLOWED.has(key)) continue;
-    if (typeof value !== "string") continue;
+  await Promise.all(
+    Object.entries(updates).map(async ([key, value]) => {
+      if (!ALL_ALLOWED.has(key)) return;
+      if (typeof value !== "string") return;
 
-    const envVar = SENSITIVE_ENV_MAP[key];
-    if (envVar) {
-      // Skip unchanged sentinel values
-      if (value === "••••••••" || value === "") continue;
-      // Store in process.env (session-scoped — also configure as Replit Secret for persistence)
-      process.env[envVar] = value;
-    } else {
-      await upsertSetting(key, value, userId);
-    }
-  }
+      const envVar = SENSITIVE_ENV_MAP[key];
+      if (envVar) {
+        // Skip the unchanged sentinel — don't overwrite with the placeholder
+        if (value === "••••••••" || value === "") return;
+        await setSecret(envVar, value);
+      } else {
+        await upsertSetting(key, value, userId);
+      }
+    })
+  );
 
   res.json({ ok: true });
 });
@@ -116,7 +124,6 @@ router.post("/settings/notifications/test-email", requireAuth, can("users:manage
     return;
   }
 
-  // Verify SMTP connection first
   try {
     const transporter = nodemailer.createTransport({
       host: cfg.host,
@@ -138,7 +145,7 @@ router.post("/settings/notifications/test-email", requireAuth, can("users:manage
       <div style="font-family:sans-serif;max-width:500px;">
         <h2 style="color:#3b82f6">✅ Email Notifications Working</h2>
         <p>This is a test message from your SecOps Console instance.</p>
-        <p>Your email notification channel is configured correctly and can deliver alerts.</p>
+        <p>Your email notification channel is configured correctly.</p>
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0"/>
         <p style="font-size:12px;color:#9ca3af">Sent from SecOps Console · ${new Date().toLocaleString()}</p>
       </div>`,
@@ -185,11 +192,11 @@ router.post("/settings/notifications/test-slack", requireAuth, can("users:manage
   res.json({ ok: true, message: "Test message sent to Slack" });
 });
 
-// GET /api/settings/integrations/threatlens — ThreatLens config status
+// GET /api/settings/integrations/threatlens
 router.get("/settings/integrations/threatlens", requireAuth, can("users:manage"), async (_req: Request, res: Response) => {
   const url = await readDbSetting("integrations.threatlens.url");
-  const hasKey = !!process.env["THREATLENS_API_KEY"];
-  res.json({ url: url ?? "", apiKeySet: hasKey });
+  const apiKey = await getSecret("THREATLENS_API_KEY");
+  res.json({ url: url ?? "", apiKeySet: !!apiKey });
 });
 
 // POST /api/settings/integrations/threatlens/test

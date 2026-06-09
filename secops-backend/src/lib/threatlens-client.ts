@@ -5,7 +5,6 @@ async function getBaseUrl(): Promise<string> {
   try {
     const { db } = await import("../db/index.js");
     const { systemSettingsTable } = await import("../db/schema/system-settings.js");
-    const { decrypt } = await import("./crypto-utils.js");
     const { eq } = await import("drizzle-orm");
 
     const row = await db
@@ -23,33 +22,17 @@ async function getBaseUrl(): Promise<string> {
   return (process.env["THREATLENS_API_URL"] ?? "http://localhost:8000").replace(/\/$/, "");
 }
 
-async function getApiKey(): Promise<string | undefined> {
-  try {
-    const { db } = await import("../db/index.js");
-    const { systemSettingsTable } = await import("../db/schema/system-settings.js");
-    const { decrypt } = await import("./crypto-utils.js");
-    const { eq } = await import("drizzle-orm");
-
-    const row = await db
-      .select()
-      .from(systemSettingsTable)
-      .where(eq(systemSettingsTable.key, "integrations.threatlens.apiKey"))
-      .limit(1);
-
-    if (row[0]?.value) {
-      return row[0].encrypted ? decrypt(row[0].value) : row[0].value;
-    }
-  } catch {
-    // fall back to env
-  }
-  return process.env["THREATLENS_API_KEY"];
+// API key is read exclusively from process.env (populated at startup from
+// Replit DB via loadSecretsIntoEnv, or set as a Replit Secret directly).
+function getApiKey(): string | undefined {
+  return process.env["THREATLENS_API_KEY"] || undefined;
 }
 
 const THREATLENS_TIMEOUT_MS = parseInt(process.env["THREATLENS_TIMEOUT_MS"] ?? "35000");
 
 async function tlFetch(path: string, options?: RequestInit): Promise<any> {
   const base = await getBaseUrl();
-  const apiKey = await getApiKey();
+  const apiKey = getApiKey();
   const url = `${base}/api/v1${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), THREATLENS_TIMEOUT_MS);
@@ -109,7 +92,7 @@ export async function addNoteToThreatLens(iocValue: string, note: string, analys
 export async function isThreatLensHealthy(): Promise<boolean> {
   try {
     const base = await getBaseUrl();
-    const apiKey = await getApiKey();
+    const apiKey = getApiKey();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     await fetch(`${base}/api/v1/health`, {

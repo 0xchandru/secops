@@ -17,6 +17,7 @@ import { getRedis } from "./lib/redis";
 import { startScheduler } from "./lib/scheduler";
 import { startSyslogReceiver } from "./receivers/syslog-server";
 import { startWorker } from "./workers/pipeline-worker";
+import { loadSecretsIntoEnv } from "./lib/replit-secrets";
 
 const rawPort = process.env["PORT"];
 
@@ -36,6 +37,15 @@ initWebSocket(server);
 
 server.listen(port, async () => {
   logger.info({ port }, "Server listening");
+
+  // Load persisted secrets (SMTP_PASSWORD, SLACK_WEBHOOK_URL, THREATLENS_API_KEY)
+  // from Replit DB into process.env before any other initialization uses them.
+  try {
+    await loadSecretsIntoEnv();
+    logger.info("Secrets loaded from Replit DB");
+  } catch (err) {
+    logger.warn({ err }, "Failed to load secrets from Replit DB");
+  }
 
   // Initialize Redis (non-blocking)
   try {

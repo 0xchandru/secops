@@ -46,7 +46,7 @@ export async function getThreatLensConfig(): Promise<{
   url: string; apiKey: string;
 } | null> {
   const url = (await getDbSetting("integrations.threatlens.url")) ?? process.env["THREATLENS_API_URL"] ?? "";
-  const apiKey = process.env["THREATLENS_API_KEY"] ?? process.env["THREATLENS_API_URL"] ?? "";
+  const apiKey = process.env["THREATLENS_API_KEY"] ?? "";
   if (!url) return null;
   return { url, apiKey };
 }
