@@ -18,8 +18,12 @@ export const rulesTable = pgTable("rules", {
   tags: text("tags").array(),
   falsePositiveRate: integer("false_positive_rate").notNull().default(0),
 
-  // Rule type: "sigma" (default), "spl_saved_search", "threshold", "correlation"
+  // Rule type: "sigma" (default), "spl_saved_search", "threshold", "correlation", "risk_score_sum", "anomaly"
   ruleType: text("rule_type").default("sigma"),
+
+  // Exceptions / suppression list — entities that should never trigger this rule
+  // Shape: { ips?: string[], hostnames?: string[], usernames?: string[], cidrs?: string[] }
+  exceptions: jsonb("exceptions").default({}),
 
   // SPL saved search fields
   splQuery: text("spl_query"),

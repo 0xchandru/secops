@@ -27,6 +27,7 @@ export async function createRule(data: {
   splQuery?: string | null;
   splThreshold?: number;
   scheduleInterval?: string;
+  exceptions?: Record<string, any> | null;
 }) {
   const [rule] = await db.insert(rulesTable).values({
     ...data,
@@ -48,6 +49,7 @@ export async function updateRule(id: string, data: {
   splQuery?: string | null;
   splThreshold?: number;
   scheduleInterval?: string;
+  exceptions?: Record<string, any> | null;
 }) {
   const [rule] = await db.update(rulesTable)
     .set({ ...data, updatedAt: new Date(), lastModifiedAt: new Date() })

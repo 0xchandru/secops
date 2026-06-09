@@ -2,7 +2,7 @@ import yaml from "js-yaml";
 import crypto from "crypto";
 import { db, rulesTable } from "../../db";
 import { eq } from "drizzle-orm";
-import type { DetectionRule, NormalizedEvent, TriggeredAlert, ThresholdConfig, SequenceConfig, SequenceStep } from "./types";
+import type { DetectionRule, NormalizedEvent, TriggeredAlert, ThresholdConfig, SequenceConfig, SequenceStep, RuleExceptions } from "./types";
 
 interface ThresholdState {
   timeframeSecs: number;
@@ -13,7 +13,6 @@ interface SequenceState {
   timeframeSecs: number;
   byField?: string;
   steps: SequenceStep[];
-  // Map<groupKey, Array<{ stepIndex, timestamp }>>
   progress: Map<string, Array<{ step: number; ts: Date }>>;
 }
 
@@ -27,10 +26,9 @@ class DetectionEngine {
   private thresholdStates: Map<string, ThresholdState> = new Map();
   private sequenceStates: Map<string, SequenceState> = new Map();
   private rateLimits: Map<string, RateLimitState> = new Map();
-  private dedupWindows: Map<string, Map<string, Date>> = new Map(); // ruleId -> dedupKey -> lastSeen
+  private dedupWindows: Map<string, Map<string, Date>> = new Map();
   private lastLoaded: Date = new Date(0);
 
-  // Pre-filter indexes for fast rule lookup
   private rulesByCategory: Map<string, DetectionRule[]> = new Map();
   private rulesBySourceType: Map<string, DetectionRule[]> = new Map();
   private universalRules: DetectionRule[] = [];
@@ -44,7 +42,6 @@ class DetectionEngine {
       let indexed = false;
       const match = rule.match ?? {};
 
-      // Index by category if the rule has a simple category match
       if (match.category && typeof match.category === "string") {
         const cat = match.category.toLowerCase();
         const list = this.rulesByCategory.get(cat) ?? [];
@@ -60,7 +57,6 @@ class DetectionEngine {
         indexed = true;
       }
 
-      // Rules that don't match on category or sourceType must be checked against everything
       if (!indexed) {
         this.universalRules.push(rule);
       }
@@ -70,16 +66,13 @@ class DetectionEngine {
   getCandidateRules(event: NormalizedEvent): DetectionRule[] {
     const candidates = new Set<DetectionRule>();
 
-    // Always include universal rules
     for (const r of this.universalRules) candidates.add(r);
 
-    // Include rules matching event's category
     if (event.category) {
       const catRules = this.rulesByCategory.get(event.category.toLowerCase());
       if (catRules) for (const r of catRules) candidates.add(r);
     }
 
-    // Include rules matching event's sourceType
     if (event.sourceType) {
       const stRules = this.rulesBySourceType.get(event.sourceType.toLowerCase());
       if (stRules) for (const r of stRules) candidates.add(r);
@@ -111,6 +104,15 @@ class DetectionEngine {
             timeframe: parsed.sequence.timeframe ?? "5m",
             byField: parsed.sequence.by_field,
           } : undefined,
+          riskSumConfig: parsed.risk_sum ? {
+            field: parsed.risk_sum.field,
+            sumThreshold: parsed.risk_sum.sum_threshold ?? 200,
+            timeframe: parsed.risk_sum.timeframe ?? "1h",
+          } : undefined,
+          anomalyConfig: parsed.anomaly ? {
+            stddevMultiplier: parsed.anomaly.stddev_multiplier ?? 3,
+            baselineField: parsed.anomaly.baseline_field,
+          } : undefined,
           maxAlertsPerHour: parsed.max_alerts_per_hour ?? parsed.maxAlertsPerHour,
           dedupWindow: parsed.dedup_window ?? parsed.dedupWindow,
           mitre: parsed.mitre ? {
@@ -125,6 +127,7 @@ class DetectionEngine {
             contextFields: parsed.alert?.context_fields ?? [],
           },
           tags: parsed.tags ?? row.tags ?? [],
+          exceptions: this.parseExceptions(parsed.exceptions ?? row.exceptions),
         };
         this.rules.push(rule);
 
@@ -164,14 +167,53 @@ class DetectionEngine {
     this.lastLoaded = new Date();
   }
 
+  private parseExceptions(raw: any): RuleExceptions | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const ex: RuleExceptions = {};
+    if (Array.isArray(raw.ips)) ex.ips = raw.ips.map(String);
+    if (Array.isArray(raw.cidrs)) ex.cidrs = raw.cidrs.map(String);
+    if (Array.isArray(raw.hostnames)) ex.hostnames = raw.hostnames.map(String);
+    if (Array.isArray(raw.usernames)) ex.usernames = raw.usernames.map(String);
+    return Object.keys(ex).length > 0 ? ex : undefined;
+  }
+
+  /** Check if an event matches an exceptions list — returns true if the event should be suppressed */
+  private isExcepted(event: NormalizedEvent, exceptions?: RuleExceptions): boolean {
+    if (!exceptions) return false;
+
+    if (exceptions.ips?.length) {
+      const ip = event.srcIp ?? event.dstIp ?? "";
+      if (exceptions.ips.some(x => x === ip)) return true;
+    }
+
+    if (exceptions.cidrs?.length) {
+      const ip = event.srcIp ?? "";
+      if (ip && exceptions.cidrs.some(c => isIpInCidr(ip, c))) return true;
+    }
+
+    if (exceptions.hostnames?.length) {
+      const host = (event.sourceHost ?? "").toLowerCase();
+      if (exceptions.hostnames.some(h => h.toLowerCase() === host)) return true;
+    }
+
+    if (exceptions.usernames?.length) {
+      const user = (event.userName ?? "").toLowerCase();
+      if (user && exceptions.usernames.some(u => u.toLowerCase() === user)) return true;
+    }
+
+    return false;
+  }
+
   evaluate(event: NormalizedEvent): TriggeredAlert[] {
     const alerts: TriggeredAlert[] = [];
     const candidates = this.getCandidateRules(event);
     for (const rule of candidates) {
       if (!rule.enabled) continue;
 
-      // Rate limiting check
       if (rule.maxAlertsPerHour && this.isRateLimited(rule.id)) continue;
+
+      // Check exceptions/suppression list
+      if (this.isExcepted(event, rule.exceptions)) continue;
 
       if (rule.type === "simple") {
         if (!this.matches(event, rule.match)) continue;
@@ -214,22 +256,18 @@ class DetectionEngine {
         const seqState = this.sequenceStates.get(rule.id);
         if (!seqState) continue;
 
-        // Determine group key
         const groupKey = seqState.byField ? String(event[seqState.byField] ?? "global") : "global";
         const progress = seqState.progress.get(groupKey) ?? [];
         const now = event.timestamp;
         const cutoff = new Date(now.getTime() - seqState.timeframeSecs * 1000);
 
-        // Clean expired entries
         const validProgress = progress.filter((p) => p.ts > cutoff);
 
-        // Check which step this event matches
         for (let stepIdx = 0; stepIdx < seqState.steps.length; stepIdx++) {
           const step = seqState.steps[stepIdx];
           if (!this.matches(event, step.match)) continue;
           if (step.filter && this.matches(event, step.filter)) continue;
 
-          // Can only advance to this step if previous steps are completed
           if (stepIdx === 0) {
             validProgress.push({ step: 0, ts: now });
           } else {
@@ -239,7 +277,6 @@ class DetectionEngine {
             }
           }
 
-          // Check if sequence is complete
           if (stepIdx === seqState.steps.length - 1) {
             const allStepsPresent = Array.from({ length: seqState.steps.length }, (_, i) => i)
               .every((i) => validProgress.some((p) => p.step === i));
@@ -255,15 +292,15 @@ class DetectionEngine {
               const alert = this.createAlert(rule, event, extra);
               this.recordRateLimit(rule.id);
               alerts.push(alert);
-              // Reset progress for this group
               seqState.progress.set(groupKey, []);
-              break; // don't re-check further steps
+              break;
             }
           }
         }
 
         seqState.progress.set(groupKey, validProgress);
       }
+      // risk_score_sum and anomaly are handled by the scheduler, not the per-event engine
     }
     return alerts;
   }
@@ -290,6 +327,7 @@ class DetectionEngine {
       filter: parsed.filter,
       threshold: parsed.threshold,
       sequence: parsed.sequence,
+      exceptions: this.parseExceptions(parsed.exceptions),
       alert: {
         titleTemplate: parsed.alert?.title_template ?? parsed.name ?? "Test Alert",
         contextFields: parsed.alert?.context_fields ?? [],
@@ -299,7 +337,16 @@ class DetectionEngine {
 
     const results: TriggeredAlert[] = [];
     for (const event of events) {
+      if (this.isExcepted(event, rule.exceptions)) continue;
+
       if (rule.type === "simple") {
+        if (this.matches(event, rule.match)) {
+          if (!rule.filter || !this.matches(event, rule.filter)) {
+            results.push(this.createAlert(rule, event, {}));
+          }
+        }
+      } else if (rule.type === "threshold" && rule.threshold) {
+        // For test mode: count occurrences and return one result if threshold met
         if (this.matches(event, rule.match)) {
           if (!rule.filter || !this.matches(event, rule.filter)) {
             results.push(this.createAlert(rule, event, {}));
@@ -318,7 +365,6 @@ class DetectionEngine {
 
       const actual = event[fieldName];
 
-      // "exists" modifier: check field presence
       if (modifiers[0] === "exists") {
         const shouldExist = expected === true || expected === "true";
         if (shouldExist && actual == null) return false;
@@ -326,7 +372,6 @@ class DetectionEngine {
         continue;
       }
 
-      // "not" modifier inverts the result of the remaining modifiers
       const isNegated = modifiers[0] === "not";
       const effectiveModifiers = isNegated ? modifiers.slice(1) : modifiers;
 
@@ -369,7 +414,6 @@ class DetectionEngine {
         const cidrs = Array.isArray(expected) ? expected : [expected];
         matched = cidrs.some(c => isIpInCidr(String(actual), String(c)));
       } else {
-        // Unknown modifier — treat as exact match
         matched = actualStr === String(expected).toLowerCase();
       }
 
@@ -385,14 +429,10 @@ class DetectionEngine {
     }
     Object.assign(context, extra);
 
-    // Build title from template
     const templateVars: Record<string, any> = { ...flattenEvent(event), ...extra };
     const title = rule.alert.titleTemplate.replace(/\{(\w+)\}/g, (_, k) => String(templateVars[k] ?? `{${k}}`));
 
-    // Compute severity score
     const severityScore = this.computeSeverityScore(rule, event);
-
-    // Build dedup key
     const dedupKey = computeDedupKey(rule.id, extra);
 
     return {
@@ -470,7 +510,6 @@ class DetectionEngine {
     }
     map.set(dedupKey, now);
 
-    // Cleanup old entries periodically (keep map from growing indefinitely)
     if (map.size > 1000) {
       const cutoff = new Date(now.getTime() - windowSecs * 1000);
       for (const [k, v] of map) {
@@ -541,4 +580,5 @@ function computeDedupKey(ruleId: string, extra: Record<string, any>): string {
   return crypto.createHash("sha256").update(str).digest("hex").slice(0, 32);
 }
 
+export { isIpInCidr, parseTimeframe };
 export const detectionEngine = new DetectionEngine();

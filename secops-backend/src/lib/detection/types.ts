@@ -107,12 +107,20 @@ export interface SequenceStep {
 export interface SequenceConfig {
   steps: SequenceStep[];
   timeframe: string;
-  byField?: string; // group correlation by this field (e.g., srcIp)
+  byField?: string;
 }
 
 export interface AlertConfig {
   titleTemplate: string;
   contextFields?: string[];
+}
+
+/** Exceptions / suppression list for a rule */
+export interface RuleExceptions {
+  ips?: string[];
+  cidrs?: string[];
+  hostnames?: string[];
+  usernames?: string[];
 }
 
 export interface DetectionRule {
@@ -121,17 +129,22 @@ export interface DetectionRule {
   description: string;
   author?: string;
   severity: "critical" | "high" | "medium" | "low";
-  type: "simple" | "threshold" | "sequence";
+  type: "simple" | "threshold" | "sequence" | "risk_score_sum" | "anomaly";
   enabled: boolean;
   match: Record<string, any>;
   filter?: Record<string, any>;
   threshold?: ThresholdConfig;
   sequence?: SequenceConfig;
+  /** risk_score_sum: accumulate riskScore per entity key, fire when sum >= threshold */
+  riskSumConfig?: { field: string; sumThreshold: number; timeframe: string };
+  /** anomaly: fire when event count deviates > N stddevs from 7-day hourly baseline */
+  anomalyConfig?: { stddevMultiplier: number; baselineField?: string };
   maxAlertsPerHour?: number;
-  dedupWindow?: string; // e.g., "1h" — windowed dedup instead of permanent
+  dedupWindow?: string;
   mitre?: MitreMapping;
   alert: AlertConfig;
   tags?: string[];
+  exceptions?: RuleExceptions;
 }
 
 export interface TriggeredAlert {

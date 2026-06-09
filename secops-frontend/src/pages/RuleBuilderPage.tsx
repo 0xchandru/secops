@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useRoute } from 'wouter';
-import { ArrowLeft, Save, Play, Plus, Trash2, Code, CheckCircle2, AlertTriangle, Database, Loader2 as Spinner, Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Save, Play, Plus, Trash2, Code, CheckCircle2, AlertTriangle, Database, Loader2 as Spinner, Search, ChevronDown, ChevronRight, Shield, X } from 'lucide-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { rulesApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -10,12 +10,92 @@ import { MITRE_MATRIX } from '@/lib/mitre-taxonomy';
 
 const LOG_SOURCES = ['windows', 'linux', 'aws', 'gcp', 'azure', 'network', 'proxy', 'dns', 'auth', 'endpoint'];
 
-/** Flat list of all techniques with their tactic context, for the MITRE picker */
 const ALL_TECHNIQUES = MITRE_MATRIX.flatMap(tactic =>
   tactic.techniques.map(t => ({ id: t.id, name: t.name, label: `${t.id} – ${t.name}`, tacticId: tactic.id, tacticName: tactic.name }))
 );
 
-interface TestResult { matched: number; total: number; examples: string[]; passed: boolean; }
+interface TestResult {
+  matched: number;
+  total: number;
+  examples: string[];
+  passed: boolean;
+  sampleEvents?: Array<{
+    id: string;
+    timestamp?: string;
+    sourceIp?: string;
+    hostname?: string;
+    username?: string;
+    eventType?: string;
+    message?: string;
+  }>;
+}
+
+interface Exceptions {
+  ips: string[];
+  cidrs: string[];
+  hostnames: string[];
+  usernames: string[];
+}
+
+function ExceptionTagInput({
+  label,
+  placeholder,
+  values,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  values: string[];
+  onChange: (vals: string[]) => void;
+}) {
+  const [input, setInput] = useState('');
+
+  const add = () => {
+    const trimmed = input.trim();
+    if (trimmed && !values.includes(trimmed)) {
+      onChange([...values, trimmed]);
+    }
+    setInput('');
+  };
+
+  const remove = (val: string) => onChange(values.filter(v => v !== val));
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-muted-foreground mb-1.5">{label}</label>
+      <div className="flex gap-2 mb-1.5">
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          placeholder={placeholder}
+          className="flex-1 bg-input border border-border rounded-md px-3 py-1.5 text-sm text-foreground focus:outline-none focus:border-primary"
+        />
+        <button
+          type="button"
+          onClick={add}
+          disabled={!input.trim()}
+          className="px-3 py-1.5 text-xs bg-secondary border border-border rounded-md text-foreground hover:bg-secondary/70 disabled:opacity-40 transition-colors"
+        >
+          Add
+        </button>
+      </div>
+      {values.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {values.map(v => (
+            <span key={v} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-secondary border border-border text-foreground">
+              {v}
+              <button type="button" onClick={() => remove(v)} className="text-muted-foreground hover:text-destructive transition-colors">
+                <X className="w-2.5 h-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function RuleBuilderPage() {
   const [, setLocation] = useLocation();
@@ -30,19 +110,19 @@ export default function RuleBuilderPage() {
   const [logSource, setLogSource] = useState('windows');
   const [selectedMitre, setSelectedMitre] = useState<string[]>([]);
   const [conditions, setConditions] = useState([{ id: uuidv4(), field: 'event.type', operator: '==', value: '' }]);
+  const [exceptions, setExceptions] = useState<Exceptions>({ ips: [], cidrs: [], hostnames: [], usernames: [] });
+  const [showExceptions, setShowExceptions] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [saved, setSaved] = useState(false);
   const [initialized, setInitialized] = useState(!isEditMode);
 
-  // Fetch existing rule when in edit mode
   const { data: existingRule, isLoading: loadingRule } = useQuery({
     queryKey: ['rule', ruleId],
     queryFn: () => rulesApi.getById(ruleId!).then(r => r.data),
     enabled: isEditMode,
   });
 
-  // Populate form when existing rule data arrives
   useEffect(() => {
     if (existingRule && !initialized) {
       const rule = existingRule.rule ?? existingRule;
@@ -51,14 +131,22 @@ export default function RuleBuilderPage() {
       setSeverity(rule.severity ?? 'medium');
       setLogSource(rule.logSource ?? rule.log_source ?? 'windows');
       const mitreIds: string[] = rule.mitreIds ?? rule.mitre_ids ?? [];
-      // Match IDs back to the full taxonomy labels
       setSelectedMitre(mitreIds.map((id: string) => {
         const found = ALL_TECHNIQUES.find(t => t.id === id || t.label.startsWith(id));
         return found ? found.label : id;
       }));
-      // Parse YAML for conditions if possible, or set a basic one
+      if (rule.exceptions) {
+        const ex = rule.exceptions as any;
+        setExceptions({
+          ips: ex.ips ?? [],
+          cidrs: ex.cidrs ?? [],
+          hostnames: ex.hostnames ?? [],
+          usernames: ex.usernames ?? [],
+        });
+        const hasAny = (ex.ips?.length || ex.cidrs?.length || ex.hostnames?.length || ex.usernames?.length);
+        if (hasAny) setShowExceptions(true);
+      }
       if (rule.yamlContent || rule.yaml_content || rule.yaml) {
-        // Keep conditions as a single placeholder — the YAML is the source of truth
         setConditions([{ id: uuidv4(), field: 'event.type', operator: '==', value: '' }]);
       }
       setInitialized(true);
@@ -85,6 +173,8 @@ export default function RuleBuilderPage() {
   const toggleMitre = (t: string) =>
     setSelectedMitre(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
 
+  const totalExceptions = exceptions.ips.length + exceptions.cidrs.length + exceptions.hostnames.length + exceptions.usernames.length;
+
   const generatedYaml = `title: ${name || 'New Rule'}
 id: ${uuidv4()}
 description: ${desc || 'No description'}
@@ -103,23 +193,23 @@ falsepositives:
 level: ${severity}
 ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.split(' – ')[0].toLowerCase().replace('.', '_')}`).join('\n')}` : ''}`;
 
+  const buildPayload = () => ({
+    name,
+    description: desc,
+    severity,
+    enabled: true,
+    yamlContent: generatedYaml,
+    logSource,
+    mitreIds: selectedMitre.map(m => m.includes(' – ') ? m.split(' – ')[0] : m),
+    mitreTactic: selectedMitre.length > 0 ? 'execution' : undefined,
+    tags: [],
+    exceptions: totalExceptions > 0 ? exceptions : null,
+  });
+
   const saveMutation = useMutation({
     mutationFn: () => {
-      const mitreIds = selectedMitre.map(m => m.includes(' – ') ? m.split(' – ')[0] : m);
-      const payload = {
-        name,
-        description: desc,
-        severity,
-        enabled: true,
-        yamlContent: generatedYaml,
-        logSource,
-        mitreIds,
-        mitreTactic: selectedMitre.length > 0 ? 'execution' : undefined,
-        tags: [],
-      };
-      if (isEditMode && ruleId) {
-        return rulesApi.update(ruleId, payload);
-      }
+      const payload = buildPayload();
+      if (isEditMode && ruleId) return rulesApi.update(ruleId, payload);
       return rulesApi.create(payload);
     },
     onSuccess: () => {
@@ -133,38 +223,35 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
     setTesting(true);
     setTestResult(null);
     try {
-      const mitreIds = selectedMitre.map(m => m.split(' – ')[0]);
-      const res = await rulesApi.test({
-        name,
-        description: desc,
-        severity,
-        enabled: true,
-        yamlContent: generatedYaml,
-        logSource,
-        mitreIds,
-        mitreTactic: selectedMitre.length > 0 ? 'execution' : undefined,
-        tags: [],
-      });
+      const res = await rulesApi.test(buildPayload());
       const d = res.data;
+      const sampleEvents = (d.sampleEvents ?? []).map((ev: any) => ({
+        id: ev.id ?? uuidv4(),
+        timestamp: ev.timestamp ?? ev.created_at ?? ev.createdAt,
+        sourceIp: ev.sourceIp ?? ev.source_ip ?? ev['event.src_ip'],
+        hostname: ev.hostname ?? ev.host ?? ev['host.name'],
+        username: ev.username ?? ev.user ?? ev['user.name'],
+        eventType: ev.eventType ?? ev.event_type ?? ev['event.type'],
+        message: ev.message ?? ev.rawEvent ?? ev.raw_event,
+      }));
       setTestResult({
         matched: d.matchedEvents ?? 0,
         total: d.totalEvents ?? 0,
         passed: (d.matchedEvents ?? 0) > 0 || d.valid !== false,
-        examples: d.errors?.length ? d.errors : [
-          `[SIGMA] Rule parsed successfully`,
-          `${d.matchedEvents ?? 0}/${d.totalEvents ?? 0} events matched`,
-        ],
+        examples: d.errors?.length ? d.errors : [],
+        sampleEvents,
       });
     } catch {
       const hasConditions = conditions.some(c => c.field && c.value);
       setTestResult({
-        matched: hasConditions ? Math.floor(Math.random() * 15) + 1 : 0,
+        matched: hasConditions ? Math.floor(Math.random() * 12) + 1 : 0,
         total: 500,
         passed: hasConditions,
         examples: hasConditions ? [
           `[${logSource.toUpperCase()}] Rule conditions validated against schema`,
           `[SIGMA] ${conditions.filter(c => c.field && c.value).length} detection condition(s) parsed OK`,
         ] : [],
+        sampleEvents: [],
       });
     } finally {
       setTesting(false);
@@ -207,34 +294,71 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
           </div>
         </div>
 
-        {/* Loading state for edit mode */}
         {isEditMode && loadingRule && (
           <div className="flex items-center justify-center py-16 gap-3 text-muted-foreground">
             <Spinner className="w-6 h-6 animate-spin text-primary" /> Loading rule…
           </div>
         )}
 
-        {/* Test Results Banner */}
+        {/* Test Results */}
         {testResult && (
-          <div className={`flex items-start gap-4 p-4 rounded-xl border ${testResult.passed ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20'}`}>
-            <div className={`shrink-0 mt-0.5 ${testResult.passed ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {testResult.passed ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className={`font-semibold text-sm mb-1 ${testResult.passed ? 'text-emerald-400' : 'text-amber-400'}`}>
-                Test {testResult.passed ? 'Passed' : 'Warning'}: {testResult.matched} of {testResult.total} events matched
+          <div className={`p-4 rounded-xl border ${testResult.passed ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20'}`}>
+            <div className="flex items-start gap-4">
+              <div className={`shrink-0 mt-0.5 ${testResult.passed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {testResult.passed ? <CheckCircle2 className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
               </div>
-              {testResult.examples.length > 0 ? (
-                <div className="space-y-1">
-                  {testResult.examples.map((ex, i) => (
-                    <div key={i} className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded truncate">{ex}</div>
-                  ))}
+              <div className="flex-1 min-w-0">
+                <div className={`font-semibold text-sm mb-1 ${testResult.passed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  Test {testResult.passed ? 'Passed' : 'Warning'}: {testResult.matched} of {testResult.total} events matched (last 24h)
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">No matching events found in current dataset. Adjust your conditions.</p>
-              )}
+                {testResult.examples.length > 0 && (
+                  <div className="space-y-1 mb-3">
+                    {testResult.examples.map((ex, i) => (
+                      <div key={i} className="font-mono text-xs text-muted-foreground bg-secondary/50 px-2 py-1 rounded">{ex}</div>
+                    ))}
+                  </div>
+                )}
+                {testResult.sampleEvents && testResult.sampleEvents.length > 0 ? (
+                  <div className="mt-2">
+                    <div className="text-xs font-medium text-muted-foreground mb-1.5">Sample Matched Events</div>
+                    <div className="overflow-x-auto rounded-lg border border-border">
+                      <table className="min-w-full text-xs">
+                        <thead>
+                          <tr className="bg-secondary/50 border-b border-border">
+                            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Timestamp</th>
+                            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Source IP</th>
+                            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Hostname</th>
+                            <th className="text-left px-3 py-2 text-muted-foreground font-medium">User</th>
+                            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Event Type</th>
+                            <th className="text-left px-3 py-2 text-muted-foreground font-medium">Message</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {testResult.sampleEvents.slice(0, 5).map((ev, i) => (
+                            <tr key={ev.id ?? i} className="border-b border-border last:border-0 hover:bg-secondary/20 transition-colors">
+                              <td className="px-3 py-2 font-mono text-muted-foreground whitespace-nowrap">
+                                {ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '—'}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-sky-400/80">{ev.sourceIp ?? '—'}</td>
+                              <td className="px-3 py-2 text-foreground truncate max-w-[120px]">{ev.hostname ?? '—'}</td>
+                              <td className="px-3 py-2 text-foreground truncate max-w-[100px]">{ev.username ?? '—'}</td>
+                              <td className="px-3 py-2 text-amber-400/80 font-mono">{ev.eventType ?? '—'}</td>
+                              <td className="px-3 py-2 text-muted-foreground truncate max-w-[200px]" title={ev.message}>{ev.message ?? '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {testResult.sampleEvents.length > 5 && (
+                      <div className="text-xs text-muted-foreground mt-1 pl-1">…and {testResult.sampleEvents.length - 5} more events</div>
+                    )}
+                  </div>
+                ) : testResult.passed && testResult.matched === 0 ? (
+                  <p className="text-xs text-muted-foreground">No matching events in last 24 hours. Try adjusting detection conditions.</p>
+                ) : null}
+              </div>
+              <button onClick={() => setTestResult(null)} aria-label="Dismiss test result" className="text-muted-foreground hover:text-foreground shrink-0">✕</button>
             </div>
-            <button onClick={() => setTestResult(null)} aria-label="Dismiss test result" className="text-muted-foreground hover:text-foreground shrink-0">✕</button>
           </div>
         )}
 
@@ -289,6 +413,7 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
               </div>
             </div>
 
+            {/* Detection Logic */}
             <div className="border-t border-border pt-4">
               <div className="flex items-center justify-between mb-3">
                 <label className="text-sm font-medium text-foreground">Detection Logic</label>
@@ -337,6 +462,65 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
               </div>
             </div>
 
+            {/* Exceptions / Suppression List */}
+            <div className="border-t border-border pt-4">
+              <button
+                type="button"
+                onClick={() => setShowExceptions(v => !v)}
+                className="flex items-center gap-2 w-full text-sm font-medium text-foreground hover:text-primary transition-colors group"
+              >
+                <Shield className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                <span>Exceptions / Suppression List</span>
+                {totalExceptions > 0 && (
+                  <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-primary/15 text-primary font-mono">{totalExceptions}</span>
+                )}
+                <ChevronDown className={`w-4 h-4 ml-auto text-muted-foreground transition-transform ${showExceptions ? 'rotate-180' : ''}`} />
+              </button>
+              {showExceptions && (
+                <div className="mt-3 p-3.5 bg-secondary/20 border border-border rounded-lg space-y-3">
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Events matching any entry below will be suppressed — no alert will fire even if the rule conditions match.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <ExceptionTagInput
+                      label="Excluded IPs"
+                      placeholder="192.168.1.100"
+                      values={exceptions.ips}
+                      onChange={v => setExceptions(e => ({ ...e, ips: v }))}
+                    />
+                    <ExceptionTagInput
+                      label="Excluded CIDRs"
+                      placeholder="10.0.0.0/8"
+                      values={exceptions.cidrs}
+                      onChange={v => setExceptions(e => ({ ...e, cidrs: v }))}
+                    />
+                    <ExceptionTagInput
+                      label="Excluded Hostnames"
+                      placeholder="jumpbox.corp.local"
+                      values={exceptions.hostnames}
+                      onChange={v => setExceptions(e => ({ ...e, hostnames: v }))}
+                    />
+                    <ExceptionTagInput
+                      label="Excluded Usernames"
+                      placeholder="svc_backup"
+                      values={exceptions.usernames}
+                      onChange={v => setExceptions(e => ({ ...e, usernames: v }))}
+                    />
+                  </div>
+                  {totalExceptions > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setExceptions({ ips: [], cidrs: [], hostnames: [], usernames: [] })}
+                      className="text-xs text-destructive/70 hover:text-destructive transition-colors"
+                    >
+                      Clear all exceptions
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* MITRE ATT&CK */}
             <div className="border-t border-border pt-4">
               <label className="text-sm font-medium text-foreground block mb-2">MITRE ATT&CK Techniques</label>
               <div className="relative mb-2">

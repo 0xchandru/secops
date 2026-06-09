@@ -21,7 +21,7 @@ export async function getRule(req: Request, res: Response): Promise<void> {
 export async function createRule(req: Request, res: Response): Promise<void> {
   const {
     name, description, severity, yamlContent, logSource, mitreIds, mitreTactic, tags,
-    ruleType, splQuery, splThreshold, scheduleInterval,
+    ruleType, splQuery, splThreshold, scheduleInterval, exceptions,
   } = req.body;
   if (!name || !severity) {
     res.status(400).json({ error: "name and severity are required" });
@@ -40,6 +40,7 @@ export async function createRule(req: Request, res: Response): Promise<void> {
     splQuery: splQuery ?? null,
     splThreshold: splThreshold != null ? Number(splThreshold) : 1,
     scheduleInterval: scheduleInterval ?? "15m",
+    exceptions: exceptions ?? null,
     createdBy: req.user!.userId,
   });
   invalidateEngine();
@@ -48,12 +49,13 @@ export async function createRule(req: Request, res: Response): Promise<void> {
 }
 
 export async function updateRule(req: Request, res: Response): Promise<void> {
-  const { name, description, severity, yamlContent, mitreIds, ruleType, splQuery, splThreshold, scheduleInterval } = req.body;
+  const { name, description, severity, yamlContent, mitreIds, ruleType, splQuery, splThreshold, scheduleInterval, exceptions } = req.body;
   const id = req.params.id as string;
   const rule = await rulesService.updateRule(id, {
     name, description, severity, yamlContent, mitreIds,
     ruleType, splQuery, splThreshold: splThreshold != null ? Number(splThreshold) : undefined,
     scheduleInterval,
+    exceptions: exceptions !== undefined ? exceptions : undefined,
     updatedBy: req.user!.userId,
   });
   if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
@@ -115,16 +117,16 @@ export async function testRule(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Get recent events
+  // Get recent events — last 24 hours
   const { rawLogsTable } = await import("../../db");
   const recentLogs = await db.select()
     .from(rawLogsTable)
-    .where(gte(rawLogsTable.createdAt, new Date(Date.now() - 3_600_000)))
-    .limit(200)
+    .where(gte(rawLogsTable.createdAt, new Date(Date.now() - 86_400_000)))
+    .limit(1000)
     .orderBy(sql`created_at desc`);
 
   if (recentLogs.length === 0) {
-    res.json({ valid: true, matchedEvents: 0, totalEvents: 0, errors: [], message: "No events in last hour" });
+    res.json({ valid: true, matchedEvents: 0, totalEvents: 0, errors: [], message: "No events in last 24 hours" });
     return;
   }
 
@@ -161,11 +163,19 @@ export async function testRule(req: Request, res: Response): Promise<void> {
   }));
 
   const triggered = detectionEngine.testRule(yamlContent, normalizedEvents as any);
-  const sampleMatches = triggered.slice(0, 5).map(t => ({
-    logId: t.triggerEventId,
-    message: t.description,
-    source: t.sourceHost,
-    severity: t.severity,
+
+  // Build rich sample events by joining matched triggers back to original raw log data
+  const triggeredIds = new Set(triggered.map(t => t.triggerEventId));
+  const matchedRawLogs = recentLogs.filter(l => triggeredIds.has(l.id)).slice(0, 10);
+
+  const sampleEvents = matchedRawLogs.map(log => ({
+    id: log.id,
+    timestamp: log.createdAt,
+    sourceIp: log.sourceIp ?? null,
+    hostname: log.hostname ?? null,
+    username: log.username ?? null,
+    eventType: log.eventType ?? null,
+    message: log.message ?? null,
   }));
 
   res.json({
@@ -173,7 +183,7 @@ export async function testRule(req: Request, res: Response): Promise<void> {
     matchedEvents: triggered.length,
     totalEvents: recentLogs.length,
     errors,
-    sampleMatches,
+    sampleEvents,
   });
 }
 

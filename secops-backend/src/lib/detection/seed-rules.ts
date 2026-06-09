@@ -158,7 +158,7 @@ dedup_window: "10m"
     mitreIds: ["T1046"],
     mitreTactic: "Discovery",
     tags: ["firewall", "port-scan"],
-    yamlContent: `name: "Firewall Connection Blocked \\u2013 Repeated"
+    yamlContent: `name: "Firewall Connection Blocked \u2013 Repeated"
 description: Repeated blocked connections from same source IP
 severity: medium
 type: threshold
@@ -346,7 +346,7 @@ tags: [registry, persistence]
     mitreIds: ["T1558.003"],
     mitreTactic: "Credential Access",
     tags: ["kerberos", "kerberoasting"],
-    yamlContent: `name: "Kerberoasting \\u2013 SPN Request Spike"
+    yamlContent: `name: "Kerberoasting \u2013 SPN Request Spike"
 description: Spike in Kerberos service ticket requests from single user
 severity: high
 type: threshold
@@ -379,7 +379,7 @@ dedup_window: "15m"
     mitreIds: ["T1078.004"],
     mitreTactic: "Privilege Escalation",
     tags: ["aws", "root-account", "cloudtrail"],
-    yamlContent: `name: "CloudTrail \\u2013 Root Account Usage"
+    yamlContent: `name: "CloudTrail \u2013 Root Account Usage"
 description: AWS root account API activity detected
 severity: critical
 type: simple
@@ -476,7 +476,7 @@ tags: [sequence, persistence, iam]
     mitreIds: ["T1071.004"],
     mitreTactic: "Command and Control",
     tags: ["dns", "tunneling", "exfiltration"],
-    yamlContent: `name: "Excessive DNS Queries \\u2013 Possible Tunneling"
+    yamlContent: `name: "Excessive DNS Queries \u2013 Possible Tunneling"
 description: Excessive DNS queries from a single host
 severity: high
 type: threshold
@@ -496,6 +496,373 @@ alert:
   context_fields: [sourceHost, dnsQuery, srcIp]
 tags: [dns, tunneling, exfiltration]
 max_alerts_per_hour: 5
+dedup_window: "10m"
+`,
+  },
+
+  // ── Rule 16: Pass-the-Hash Detection ──────────────────────────
+  {
+    name: "Pass-the-Hash Attack Detected",
+    description: "Detects NTLM authentication with anomalous logon type 3 (Network) from a workstation, a known pass-the-hash indicator.",
+    severity: "critical",
+    logSource: "windows_eventlog",
+    mitreIds: ["T1550.002"],
+    mitreTactic: "Lateral Movement",
+    tags: ["lateral-movement", "pass-the-hash", "ntlm"],
+    yamlContent: `name: Pass-the-Hash Attack Detected
+description: NTLM network logon with NTHash from non-DC host
+severity: critical
+type: simple
+match:
+  category: "authentication"
+  action: "login_success"
+  logonType: 3
+  processName: "NtLmSsp"
+  srcIp|not|cidr:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "127.0.0.0/8"
+mitre:
+  tactic: Lateral Movement
+  technique_id: T1550.002
+  technique_name: "Use Alternate Authentication Material: Pass the Hash"
+alert:
+  title_template: "Pass-the-Hash: {userName} from {srcIp} to {sourceHost}"
+  context_fields: [userName, srcIp, sourceHost, logonType, processName]
+tags: [lateral-movement, pass-the-hash, ntlm]
+dedup_window: "30m"
+`,
+  },
+
+  // ── Rule 17: Scheduled Task Created for Persistence ────────────
+  {
+    name: "Scheduled Task Created for Persistence",
+    description: "Detects creation of scheduled tasks, a common persistence mechanism used by malware and attackers.",
+    severity: "high",
+    logSource: "windows_eventlog",
+    mitreIds: ["T1053.005"],
+    mitreTactic: "Persistence",
+    tags: ["persistence", "scheduled-task"],
+    yamlContent: `name: Scheduled Task Created for Persistence
+description: Scheduled task creation detected via schtasks or Task Scheduler API
+severity: high
+type: simple
+match:
+  category: "process"
+  action: "process_create"
+  processName|contains|any:
+    - "schtasks.exe"
+    - "taskschd.msc"
+  processCommandLine|contains|any:
+    - "/create"
+    - "/sc"
+    - "/tr"
+filter:
+  processCommandLine|contains:
+    - "Microsoft\\\\Windows\\\\UpdateOrchestrator"
+mitre:
+  tactic: Persistence
+  technique_id: T1053.005
+  technique_name: "Scheduled Task/Job: Scheduled Task"
+alert:
+  title_template: "Scheduled task created on {sourceHost} by {userName}"
+  context_fields: [processCommandLine, userName, sourceHost, processName, parentProcessName]
+tags: [persistence, scheduled-task]
+`,
+  },
+
+  // ── Rule 18: Large Outbound DNS Response – Data Exfil ──────────
+  {
+    name: "Large Outbound Data Transfer – Potential Exfiltration",
+    description: "Detects unusually large outbound network transfers that may indicate data exfiltration activity.",
+    severity: "high",
+    logSource: "firewall",
+    mitreIds: ["T1048"],
+    mitreTactic: "Exfiltration",
+    tags: ["exfiltration", "network", "data-transfer"],
+    yamlContent: `name: Large Outbound Data Transfer
+description: Single session outbound transfer exceeding 500MB
+severity: high
+type: simple
+match:
+  category: "network"
+  direction: "outbound"
+  bytesOut|gt: 524288000
+  dstIp|not|cidr:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+mitre:
+  tactic: Exfiltration
+  technique_id: T1048
+  technique_name: "Exfiltration Over Alternative Protocol"
+alert:
+  title_template: "Large outbound transfer: {bytesOut} bytes to {dstIp} from {sourceHost}"
+  context_fields: [srcIp, dstIp, dstPort, bytesOut, protocol, sourceHost]
+tags: [exfiltration, network, data-transfer]
+max_alerts_per_hour: 5
+dedup_window: "1h"
+`,
+  },
+
+  // ── Rule 19: Privilege Escalation via Token Impersonation ───────
+  {
+    name: "Token Impersonation / Privilege Escalation",
+    description: "Detects token impersonation techniques used for privilege escalation, such as those leveraged by Juicy Potato, Rogue Potato, or similar tools.",
+    severity: "critical",
+    logSource: "windows_eventlog",
+    mitreIds: ["T1134"],
+    mitreTactic: "Privilege Escalation",
+    tags: ["privilege-escalation", "token-impersonation"],
+    yamlContent: `name: Token Impersonation Privilege Escalation
+description: Token impersonation technique detected (JuicyPotato, RoguePotato, etc.)
+severity: critical
+type: simple
+match:
+  category: "process"
+  action: "process_create"
+  processCommandLine|contains|any:
+    - "JuicyPotato"
+    - "RoguePotato"
+    - "PrintSpoofer"
+    - "GodPotato"
+    - "SweetPotato"
+    - "SeImpersonatePrivilege"
+mitre:
+  tactic: Privilege Escalation
+  technique_id: T1134
+  technique_name: "Access Token Manipulation"
+alert:
+  title_template: "Token impersonation attempt on {sourceHost} by {userName}"
+  context_fields: [processCommandLine, userName, sourceHost, processName, parentProcessName]
+tags: [privilege-escalation, token-impersonation]
+`,
+  },
+
+  // ── Rule 20: Suspicious Process Spawned by Office App ──────────
+  {
+    name: "Office Application Spawning Shell",
+    description: "Detects when Microsoft Office applications spawn command interpreters or scripting engines — a common initial access technique via malicious macros.",
+    severity: "critical",
+    logSource: "windows_eventlog",
+    mitreIds: ["T1566.001"],
+    mitreTactic: "Initial Access",
+    tags: ["phishing", "macro", "office", "initial-access"],
+    yamlContent: `name: Office Application Spawning Shell
+description: Office application (Word/Excel/PowerPoint) spawning cmd/PowerShell
+severity: critical
+type: simple
+match:
+  category: "process"
+  action: "process_create"
+  parentProcessName|contains|any:
+    - "WINWORD.EXE"
+    - "EXCEL.EXE"
+    - "POWERPNT.EXE"
+    - "OUTLOOK.EXE"
+    - "winword"
+    - "excel"
+    - "powerpnt"
+    - "outlook"
+  processName|contains|any:
+    - "cmd.exe"
+    - "powershell.exe"
+    - "wscript.exe"
+    - "cscript.exe"
+    - "mshta.exe"
+    - "regsvr32.exe"
+    - "rundll32.exe"
+mitre:
+  tactic: Initial Access
+  technique_id: T1566.001
+  technique_name: "Phishing: Spearphishing Attachment"
+alert:
+  title_template: "Office macro shell: {parentProcessName} spawned {processName} on {sourceHost}"
+  context_fields: [processName, parentProcessName, processCommandLine, userName, sourceHost]
+tags: [phishing, macro, office, initial-access]
+`,
+  },
+
+  // ── Rule 21: AWS IAM Policy Change ─────────────────────────────
+  {
+    name: "AWS IAM Policy Change",
+    description: "Detects modifications to IAM policies, roles, or users in AWS CloudTrail, which could indicate privilege escalation or persistent access establishment.",
+    severity: "high",
+    logSource: "cloudtrail",
+    mitreIds: ["T1098"],
+    mitreTactic: "Persistence",
+    tags: ["aws", "iam", "cloudtrail", "cloud"],
+    yamlContent: `name: AWS IAM Policy Change
+description: IAM policy/role/user modification detected in CloudTrail
+severity: high
+type: simple
+match:
+  sourceType: "cloudtrail"
+  action|contains|any:
+    - "PutUserPolicy"
+    - "AttachUserPolicy"
+    - "AttachRolePolicy"
+    - "CreatePolicy"
+    - "CreateUser"
+    - "AddUserToGroup"
+    - "UpdateLoginProfile"
+    - "CreateAccessKey"
+mitre:
+  tactic: Persistence
+  technique_id: T1098
+  technique_name: "Account Manipulation"
+alert:
+  title_template: "AWS IAM change: {action} by {userName} from {srcIp}"
+  context_fields: [action, userName, srcIp, sourceHost, httpUserAgent]
+tags: [aws, iam, cloudtrail, cloud]
+dedup_window: "5m"
+`,
+  },
+
+  // ── Rule 22: LSASS Memory Access (Credential Dumping) ──────────
+  {
+    name: "LSASS Memory Access",
+    description: "Detects attempts to access LSASS memory, a primary method for extracting credentials from Windows systems.",
+    severity: "critical",
+    logSource: "windows_eventlog",
+    mitreIds: ["T1003.001"],
+    mitreTactic: "Credential Access",
+    tags: ["credential-dumping", "lsass"],
+    yamlContent: `name: LSASS Memory Access
+description: Process opened a handle to LSASS for memory reading
+severity: critical
+type: simple
+match:
+  category: "process"
+  action: "process_access"
+  processName: "lsass.exe"
+filter:
+  processCommandLine|contains|any:
+    - "\\\\Windows\\\\System32\\\\antimalware"
+    - "MsMpEng.exe"
+    - "svchost.exe"
+mitre:
+  tactic: Credential Access
+  technique_id: T1003.001
+  technique_name: "OS Credential Dumping: LSASS Memory"
+alert:
+  title_template: "LSASS memory access by {processName} on {sourceHost}"
+  context_fields: [processName, processCommandLine, userName, sourceHost, processId]
+tags: [credential-dumping, lsass]
+dedup_window: "5m"
+`,
+  },
+
+  // ── Rule 23: VPC Flow – Internal Port Scan ─────────────────────
+  {
+    name: "Internal Port Scan Detected",
+    description: "Detects rapid connections from one internal host to many different ports on another host, indicating a port scan.",
+    severity: "medium",
+    logSource: "vpc_flow",
+    mitreIds: ["T1046"],
+    mitreTactic: "Discovery",
+    tags: ["discovery", "port-scan", "internal"],
+    yamlContent: `name: Internal Port Scan Detected
+description: Rapid blocked connections from internal host to many ports
+severity: medium
+type: threshold
+match:
+  category: "network"
+  action: "connection_blocked"
+  srcIp|cidr:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+threshold:
+  field: srcIp
+  count: 20
+  timeframe: "2m"
+mitre:
+  tactic: Discovery
+  technique_id: T1046
+  technique_name: "Network Service Discovery"
+alert:
+  title_template: "Internal port scan: {count} connections from {srcIp}"
+  context_fields: [srcIp, dstIp, dstPort, protocol, sourceHost]
+tags: [discovery, port-scan, internal]
+max_alerts_per_hour: 5
+dedup_window: "15m"
+`,
+  },
+
+  // ── Rule 24: Cleartext Credential in HTTP Request ───────────────
+  {
+    name: "Cleartext Credentials in HTTP Request",
+    description: "Detects HTTP requests containing common cleartext credential patterns in URLs or query strings.",
+    severity: "high",
+    logSource: "proxy",
+    mitreIds: ["T1552.004"],
+    mitreTactic: "Credential Access",
+    tags: ["credential-access", "http", "cleartext"],
+    yamlContent: `name: Cleartext Credentials in HTTP Request
+description: Credential-like strings detected in HTTP URL or User-Agent
+severity: high
+type: simple
+match:
+  category: "network"
+  httpMethod|contains|any:
+    - "GET"
+    - "POST"
+  httpUrl|contains|any:
+    - "password="
+    - "passwd="
+    - "pwd="
+    - "pass="
+    - "secret="
+    - "api_key="
+    - "token="
+mitre:
+  tactic: Credential Access
+  technique_id: T1552.004
+  technique_name: "Unsecured Credentials: Private Keys"
+alert:
+  title_template: "Cleartext credential in HTTP from {srcIp} to {dstIp}"
+  context_fields: [srcIp, dstIp, httpUrl, httpMethod, userName, sourceHost]
+tags: [credential-access, http, cleartext]
+max_alerts_per_hour: 20
+dedup_window: "5m"
+`,
+  },
+
+  // ── Rule 25: Suspicious WMI Lateral Movement ───────────────────
+  {
+    name: "WMI Lateral Movement",
+    description: "Detects usage of Windows Management Instrumentation (WMI) for remote execution, a common lateral movement technique.",
+    severity: "high",
+    logSource: "windows_eventlog",
+    mitreIds: ["T1047"],
+    mitreTactic: "Lateral Movement",
+    tags: ["lateral-movement", "wmi"],
+    yamlContent: `name: WMI Lateral Movement
+description: WMI used for remote process execution
+severity: high
+type: simple
+match:
+  category: "process"
+  action: "process_create"
+  parentProcessName|contains|any:
+    - "wmiprvse.exe"
+    - "WmiPrvSE.exe"
+  processName|contains|any:
+    - "cmd.exe"
+    - "powershell.exe"
+    - "cscript.exe"
+    - "wscript.exe"
+    - "mshta.exe"
+mitre:
+  tactic: Lateral Movement
+  technique_id: T1047
+  technique_name: "Windows Management Instrumentation"
+alert:
+  title_template: "WMI remote execution: {processName} on {sourceHost}"
+  context_fields: [processName, parentProcessName, processCommandLine, userName, sourceHost]
+tags: [lateral-movement, wmi]
 dedup_window: "10m"
 `,
   },
