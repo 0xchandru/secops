@@ -78,6 +78,48 @@ export function can(permission: Permission) {
   };
 }
 
+/**
+ * Permission check that accepts either:
+ *  - A JWT-authenticated user whose role grants the permission (via ROLE_PERMISSIONS), OR
+ *  - An API-key-authenticated caller whose key includes the matching scope string.
+ *
+ * Use with requireAuthOrApiKey for endpoints that forwarders (API keys) need to reach.
+ */
+export function canOrApiKeyScope(permission: Permission) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    // API key path: check key scopes directly
+    if (user.role === "api") {
+      const scopes: string[] = req.apiKeyScopes ?? [];
+      if (scopes.includes(permission)) {
+        next();
+        return;
+      }
+      res.status(403).json({
+        error: "Insufficient permissions",
+        required: permission,
+        hint: `API key must include the '${permission}' scope`,
+      });
+      return;
+    }
+    // JWT path: check role-based permissions
+    const perms = ROLE_PERMISSIONS[user.role] ?? [];
+    if (!perms.includes(permission)) {
+      res.status(403).json({
+        error: "Insufficient permissions",
+        required: permission,
+        role: user.role,
+      });
+      return;
+    }
+    next();
+  };
+}
+
 export function requireRole(...roles: UserRole[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const user = req.user;

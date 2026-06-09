@@ -12,6 +12,8 @@ declare global {
       user?: JwtPayload;
       /** Hydrated user context with DB-driven roles/permissions. Set by requireAuthWithContext. */
       userContext?: UserContext;
+      /** API key scopes — set by requireAuthOrApiKey when an API key is used. */
+      apiKeyScopes?: string[];
     }
   }
 }
@@ -63,6 +65,7 @@ export async function requireAuthOrApiKey(req: Request, res: Response, next: Nex
             username: "api-key",
             role: "api",
           } as JwtPayload;
+          req.apiKeyScopes = candidate.scopes ?? [];
           next();
           return;
         }

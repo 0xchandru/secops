@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { requireAuth } from "../../middlewares/auth.middleware";
-import { can } from "../../middlewares/rbac.middleware";
+import { requireAuth, requireAuthOrApiKey } from "../../middlewares/auth.middleware";
+import { can, canOrApiKeyScope } from "../../middlewares/rbac.middleware";
 import { db, rawLogsTable, alertsTable } from "../../db";
 import { eq, desc, ilike, and, sql, gte, lte, or, countDistinct, type SQL } from "drizzle-orm";
 import { logAuditEvent } from "../../lib/audit";
@@ -89,7 +89,7 @@ router.post("/ingest/detections", requireAuth, can("ingest:write"), async (req: 
   res.status(201).json({ created: created.length, alerts: created });
 });
 
-router.post("/ingest/bulk", requireAuth, can("ingest:write"), async (req: Request, res: Response) => {
+router.post("/ingest/bulk", requireAuthOrApiKey, canOrApiKeyScope("ingest:write"), async (req: Request, res: Response) => {
   const { logs, sourcetype: bulkSourcetype } = req.body;
   if (!Array.isArray(logs) || logs.length === 0) {
     res.status(400).json({ error: "logs must be a non-empty array" });
