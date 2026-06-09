@@ -1,18 +1,67 @@
 import { logger } from "./logger.js";
 import type { ThreatLensLookupResponse } from "../modules/enrichment/enrichment.types.js";
 
-const THREATLENS_BASE = process.env["THREATLENS_API_URL"] ?? "http://localhost:8000";
+async function getBaseUrl(): Promise<string> {
+  try {
+    const { db } = await import("../db/index.js");
+    const { systemSettingsTable } = await import("../db/schema/system-settings.js");
+    const { decrypt } = await import("./crypto-utils.js");
+    const { eq } = await import("drizzle-orm");
+
+    const row = await db
+      .select()
+      .from(systemSettingsTable)
+      .where(eq(systemSettingsTable.key, "integrations.threatlens.url"))
+      .limit(1);
+
+    if (row[0]?.value) {
+      return row[0].value.replace(/\/$/, "");
+    }
+  } catch {
+    // DB not ready yet, fall back to env
+  }
+  return (process.env["THREATLENS_API_URL"] ?? "http://localhost:8000").replace(/\/$/, "");
+}
+
+async function getApiKey(): Promise<string | undefined> {
+  try {
+    const { db } = await import("../db/index.js");
+    const { systemSettingsTable } = await import("../db/schema/system-settings.js");
+    const { decrypt } = await import("./crypto-utils.js");
+    const { eq } = await import("drizzle-orm");
+
+    const row = await db
+      .select()
+      .from(systemSettingsTable)
+      .where(eq(systemSettingsTable.key, "integrations.threatlens.apiKey"))
+      .limit(1);
+
+    if (row[0]?.value) {
+      return row[0].encrypted ? decrypt(row[0].value) : row[0].value;
+    }
+  } catch {
+    // fall back to env
+  }
+  return process.env["THREATLENS_API_KEY"];
+}
+
 const THREATLENS_TIMEOUT_MS = parseInt(process.env["THREATLENS_TIMEOUT_MS"] ?? "35000");
 
 async function tlFetch(path: string, options?: RequestInit): Promise<any> {
-  const url = `${THREATLENS_BASE}/api/v1${path}`;
+  const base = await getBaseUrl();
+  const apiKey = await getApiKey();
+  const url = `${base}/api/v1${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), THREATLENS_TIMEOUT_MS);
   try {
     const resp = await fetch(url, {
       ...options,
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        ...(options?.headers ?? {}),
+      },
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => "");
@@ -59,9 +108,14 @@ export async function addNoteToThreatLens(iocValue: string, note: string, analys
 
 export async function isThreatLensHealthy(): Promise<boolean> {
   try {
+    const base = await getBaseUrl();
+    const apiKey = await getApiKey();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
-    await fetch(`${THREATLENS_BASE}/api/v1/health`, { signal: controller.signal }).finally(() => clearTimeout(timer));
+    await fetch(`${base}/api/v1/health`, {
+      signal: controller.signal,
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    }).finally(() => clearTimeout(timer));
     return true;
   } catch {
     return false;

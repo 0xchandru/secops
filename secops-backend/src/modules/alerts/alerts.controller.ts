@@ -1,6 +1,9 @@
 import type { Request, Response } from "express";
 import * as alertsService from "./alerts.service";
 import { logAuditEvent } from "../../lib/audit";
+import { notifyAlertAssigned } from "../../lib/notification-service";
+import { db, usersTable } from "../../db";
+import { eq } from "drizzle-orm";
 import type { AlertAction } from "../../lib/alert-state-machine";
 
 // Status transition validation: which statuses can move to which
@@ -110,6 +113,28 @@ export async function assignAlert(req: Request, res: Response): Promise<void> {
   const alert = await alertsService.assignAlertTo(id, assignedTo, req.user!.userId);
   if (!alert) { res.status(404).json({ error: "Alert not found" }); return; }
   await logAuditEvent(req, "alerts.assign", { resource: "alerts", resourceId: id, metadata: { assignedTo } });
+
+  // Email notification to assignee — fire and forget
+  setImmediate(async () => {
+    try {
+      const [assignee] = await db
+        .select({ email: usersTable.email, displayName: usersTable.displayName, username: usersTable.username })
+        .from(usersTable)
+        .where(eq(usersTable.id, assignedTo))
+        .limit(1);
+      if (assignee?.email) {
+        await notifyAlertAssigned({
+          alertId: id,
+          alertCode: (alert as any).alertCode ?? null,
+          title: (alert as any).title ?? id,
+          severity: (alert as any).severity ?? "unknown",
+          assigneeEmail: assignee.email,
+          assigneeName: assignee.displayName || assignee.username || assignee.email,
+        });
+      }
+    } catch {}
+  });
+
   res.json({ alert });
 }
 

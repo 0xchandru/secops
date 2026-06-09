@@ -14,6 +14,7 @@ import rolesRoutes from "../modules/roles/roles.routes";
 import threatlensRoutes from "../modules/threatlens/threatlens.routes";
 import enrichmentRoutes from "../modules/enrichment/enrichment.routes";
 import forwardersRoutes from "../modules/forwarders/forwarders.routes";
+import settingsRoutes from "../modules/settings/settings.routes";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(notificationsRoutes);
 router.use(threatlensRoutes);
 router.use(enrichmentRoutes);
 router.use(forwardersRoutes);
+router.use(settingsRoutes);
 
 export default router;

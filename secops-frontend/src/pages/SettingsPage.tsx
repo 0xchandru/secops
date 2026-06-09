@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { meApi, ingestApi } from '@/lib/api';
+import { meApi, ingestApi, settingsApi } from '@/lib/api';
 import type { UserSettings } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import {
@@ -8,9 +8,11 @@ import {
   CheckCheck, Trash2, Loader2, Database, Monitor, Globe, Activity, Server,
   Wifi, WifiOff, Clock, HardDrive, RefreshCw, AlertTriangle, Info, BarChart3,
   Zap, FileText, Download, UploadCloud, Smartphone, Laptop,
+  Mail, Webhook, Link2, Lock, Send,
+  FlaskConical, ShieldCheck, XCircle,
 } from 'lucide-react';
 
-type Tab = 'profile' | 'notifications' | 'security' | 'apikeys' | 'datasources' | 'system';
+type Tab = 'profile' | 'notifications' | 'security' | 'apikeys' | 'datasources' | 'system' | 'integrations';
 const TAB_SECTIONS: { section: string; tabs: { id: Tab; label: string; icon: React.ElementType }[] }[] = [
   {
     section: 'Account',
@@ -25,6 +27,7 @@ const TAB_SECTIONS: { section: string; tabs: { id: Tab; label: string; icon: Rea
     section: 'System',
     tabs: [
       { id: 'datasources', label: 'Data Sources', icon: Database },
+      { id: 'integrations', label: 'Integrations', icon: Link2 },
       { id: 'system', label: 'System Info', icon: Monitor },
     ],
   },
@@ -901,6 +904,329 @@ function SystemTab() {
   );
 }
 
+// ─── Integrations Tab ────────────────────────────────────────────────────────
+
+function FieldInput({
+  label, value, onChange, type = 'text', placeholder, hint, monospace,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  type?: string; placeholder?: string; hint?: string; monospace?: boolean;
+}) {
+  const [show, setShow] = useState(false);
+  const isPassword = type === 'password';
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-muted-foreground mb-1.5">{label}</label>
+      <div className="relative">
+        <input
+          type={isPassword && !show ? 'password' : 'text'}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={`w-full bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary ${isPassword ? 'pr-10' : ''} ${monospace ? 'font-mono' : ''}`}
+        />
+        {isPassword && (
+          <button type="button" onClick={() => setShow(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+        )}
+      </div>
+      {hint && <p className="text-[11px] text-muted-foreground mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+function SectionCard({ title, icon: Icon, iconColor, children }: {
+  title: string; icon: React.ElementType; iconColor: string; children: React.ReactNode;
+}) {
+  return (
+    <div className="bg-secondary/20 border border-border rounded-xl overflow-hidden mb-5">
+      <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border/50 bg-secondary/30">
+        <div className={`w-7 h-7 rounded-lg ${iconColor} flex items-center justify-center`}>
+          <Icon className="w-3.5 h-3.5" />
+        </div>
+        <h3 className="font-semibold text-sm text-foreground">{title}</h3>
+      </div>
+      <div className="p-5 space-y-4">{children}</div>
+    </div>
+  );
+}
+
+type TestStatus = 'idle' | 'testing' | 'ok' | 'error';
+function statusIcon(status: TestStatus, msg: string) {
+  if (status === 'testing') return <Loader2 className="w-3.5 h-3.5 animate-spin" />;
+  if (status === 'ok') return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />;
+  if (status === 'error') return <XCircle className="w-3.5 h-3.5 text-red-400" />;
+  return null;
+}
+
+function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
+  const qc = useQueryClient();
+  const { can } = useAuthStore();
+  const isAdmin = can('users:manage');
+
+  // ─── Query / Mutation ───────────────────────────────────────────────────
+  const { data: sysSettings, isLoading } = useQuery({
+    queryKey: ['system-settings'],
+    queryFn: () => settingsApi.getSystem().then(r => r.data.settings),
+    enabled: isAdmin,
+  });
+
+  // ─── Email state ────────────────────────────────────────────────────────
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailHost, setEmailHost] = useState('');
+  const [emailPort, setEmailPort] = useState('587');
+  const [emailUser, setEmailUser] = useState('');
+  const [emailPass, setEmailPass] = useState('');
+  const [emailFrom, setEmailFrom] = useState('');
+  const [emailTestStatus, setEmailTestStatus] = useState<TestStatus>('idle');
+  const [emailTestMsg, setEmailTestMsg] = useState('');
+
+  // ─── Slack state ────────────────────────────────────────────────────────
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackWebhook, setSlackWebhook] = useState('');
+  const [slackTestStatus, setSlackTestStatus] = useState<TestStatus>('idle');
+  const [slackTestMsg, setSlackTestMsg] = useState('');
+
+  // ─── ThreatLens state ───────────────────────────────────────────────────
+  const [tlUrl, setTlUrl] = useState('');
+  const [tlApiKey, setTlApiKey] = useState('');
+  const [tlTestStatus, setTlTestStatus] = useState<TestStatus>('idle');
+  const [tlTestMsg, setTlTestMsg] = useState('');
+
+  useEffect(() => {
+    if (!sysSettings) return;
+    setEmailEnabled(sysSettings['notifications.email.enabled'] === 'true');
+    setEmailHost(sysSettings['notifications.email.host'] ?? '');
+    setEmailPort(sysSettings['notifications.email.port'] ?? '587');
+    setEmailUser(sysSettings['notifications.email.username'] ?? '');
+    setEmailPass(sysSettings['notifications.email.password'] ?? '');
+    setEmailFrom(sysSettings['notifications.email.from'] ?? '');
+    setSlackEnabled(sysSettings['notifications.slack.enabled'] === 'true');
+    setSlackWebhook(sysSettings['notifications.slack.webhookUrl'] ?? '');
+    setTlUrl(sysSettings['integrations.threatlens.url'] ?? '');
+    setTlApiKey(sysSettings['integrations.threatlens.apiKey'] ?? '');
+  }, [sysSettings]);
+
+  const saveMutation = useMutation({
+    mutationFn: (updates: Record<string, string>) => settingsApi.patchSystem(updates),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['system-settings'] });
+      onSave('Integration settings saved');
+    },
+    onError: () => onSave('Failed to save settings'),
+  });
+
+  const saveAll = () => {
+    saveMutation.mutate({
+      'notifications.email.enabled': String(emailEnabled),
+      'notifications.email.host': emailHost,
+      'notifications.email.port': emailPort,
+      'notifications.email.username': emailUser,
+      'notifications.email.password': emailPass,
+      'notifications.email.from': emailFrom,
+      'notifications.slack.enabled': String(slackEnabled),
+      'notifications.slack.webhookUrl': slackWebhook,
+      'integrations.threatlens.url': tlUrl,
+      'integrations.threatlens.apiKey': tlApiKey,
+    });
+  };
+
+  const testEmail = async () => {
+    setEmailTestStatus('testing');
+    setEmailTestMsg('');
+    try {
+      const r = await settingsApi.testEmail();
+      setEmailTestStatus('ok');
+      setEmailTestMsg(r.data.message ?? 'Test email sent');
+    } catch (e: any) {
+      setEmailTestStatus('error');
+      setEmailTestMsg(e.response?.data?.error ?? 'Test failed');
+    }
+  };
+
+  const testSlack = async () => {
+    setSlackTestStatus('testing');
+    setSlackTestMsg('');
+    try {
+      await settingsApi.testSlack();
+      setSlackTestStatus('ok');
+      setSlackTestMsg('Message delivered to Slack');
+    } catch (e: any) {
+      setSlackTestStatus('error');
+      setSlackTestMsg(e.response?.data?.error ?? 'Test failed');
+    }
+  };
+
+  const testThreatLens = async () => {
+    setTlTestStatus('testing');
+    setTlTestMsg('');
+    try {
+      const r = await settingsApi.testThreatLens();
+      setTlTestStatus('ok');
+      setTlTestMsg(`Connected — ${r.data.latencyMs}ms latency`);
+    } catch (e: any) {
+      setTlTestStatus('error');
+      setTlTestMsg(e.response?.data?.error ?? 'Connection failed');
+    }
+  };
+
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <Lock className="w-10 h-10 text-muted-foreground opacity-30" />
+        <p className="text-muted-foreground text-sm">Admin access required to manage integrations.</p>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
+  }
+
+  const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
+    <button
+      type="button"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${checked ? 'bg-primary' : 'bg-secondary border border-border'}`}
+    >
+      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
+    </button>
+  );
+
+  const TestBar = ({ status, msg }: { status: TestStatus; msg: string }) => {
+    if (status === 'idle') return null;
+    return (
+      <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg mt-1 ${status === 'ok' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : status === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-secondary text-muted-foreground border border-border'}`}>
+        {statusIcon(status, msg)}
+        {msg || (status === 'testing' ? 'Testing…' : '')}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <h2 className="text-xl font-bold text-foreground mb-1">Integrations</h2>
+      <p className="text-sm text-muted-foreground mb-6">Configure email, Slack, and ThreatLens for alert delivery and enrichment.</p>
+
+      {/* Email SMTP */}
+      <SectionCard title="Email (SMTP)" icon={Mail} iconColor="bg-blue-500/15 text-blue-400">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-foreground">Enable Email Notifications</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Deliver alert emails for high/critical severity events</div>
+          </div>
+          <Toggle checked={emailEnabled} onChange={setEmailEnabled} />
+        </div>
+
+        {emailEnabled && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <FieldInput label="SMTP Host" value={emailHost} onChange={setEmailHost} placeholder="smtp.example.com" />
+              <FieldInput label="SMTP Port" value={emailPort} onChange={setEmailPort} placeholder="587" hint="587 = STARTTLS · 465 = SSL · 25 = plain" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <FieldInput label="Username" value={emailUser} onChange={setEmailUser} placeholder="alerts@example.com" />
+              <FieldInput label="Password" value={emailPass} onChange={setEmailPass} type="password" placeholder="SMTP password" />
+            </div>
+            <FieldInput label="From Address" value={emailFrom} onChange={setEmailFrom} placeholder="SecOps Console <alerts@example.com>" hint="Displayed as the sender of alert emails" />
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={testEmail}
+                disabled={emailTestStatus === 'testing' || !emailHost}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50"
+              >
+                {emailTestStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                Send Test Email
+              </button>
+            </div>
+            <TestBar status={emailTestStatus} msg={emailTestMsg} />
+          </>
+        )}
+      </SectionCard>
+
+      {/* Slack */}
+      <SectionCard title="Slack" icon={Webhook} iconColor="bg-purple-500/15 text-purple-400">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-foreground">Enable Slack Notifications</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Post alert messages to a Slack channel via incoming webhook</div>
+          </div>
+          <Toggle checked={slackEnabled} onChange={setSlackEnabled} />
+        </div>
+
+        {slackEnabled && (
+          <>
+            <FieldInput
+              label="Webhook URL"
+              value={slackWebhook}
+              onChange={setSlackWebhook}
+              type="password"
+              placeholder="https://hooks.slack.com/services/T.../B.../..."
+              hint="Create an Incoming Webhook in your Slack App settings"
+              monospace
+            />
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={testSlack}
+                disabled={slackTestStatus === 'testing' || !slackWebhook}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50"
+              >
+                {slackTestStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                Send Test Message
+              </button>
+            </div>
+            <TestBar status={slackTestStatus} msg={slackTestMsg} />
+          </>
+        )}
+      </SectionCard>
+
+      {/* ThreatLens */}
+      <SectionCard title="ThreatLens IOC Enrichment" icon={ShieldCheck} iconColor="bg-emerald-500/15 text-emerald-400">
+        <p className="text-xs text-muted-foreground -mt-1 mb-1">
+          ThreatLens provides real-time IOC scoring and MITRE technique attribution. Configure the connection below.
+        </p>
+        <FieldInput label="ThreatLens API URL" value={tlUrl} onChange={setTlUrl} placeholder="http://threatlens:8000" monospace />
+        <FieldInput
+          label="API Key (optional)"
+          value={tlApiKey}
+          onChange={setTlApiKey}
+          type="password"
+          placeholder="sk-…"
+          hint="Leave blank if your ThreatLens instance does not require authentication"
+        />
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            type="button"
+            onClick={testThreatLens}
+            disabled={tlTestStatus === 'testing' || !tlUrl}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50"
+          >
+            {tlTestStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
+            Test Connection
+          </button>
+        </div>
+        <TestBar status={tlTestStatus} msg={tlTestMsg} />
+      </SectionCard>
+
+      <div className="flex justify-end pt-2">
+        <button
+          onClick={saveAll}
+          disabled={saveMutation.isPending}
+          className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
+        >
+          {saveMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+          Save Integration Settings
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('profile');
   const [toast, setToast] = useState<string | null>(null);
@@ -944,6 +1270,7 @@ export default function SettingsPage() {
               {activeTab === 'security' && <SecurityTab onSave={showToast} />}
               {activeTab === 'apikeys' && <ApiKeysTab onSave={showToast} />}
               {activeTab === 'datasources' && <DataSourcesTab />}
+              {activeTab === 'integrations' && <IntegrationsTab onSave={showToast} />}
               {activeTab === 'system' && <SystemTab />}
             </div>
           </div>

@@ -464,6 +464,25 @@ export const threatlensApi = {
     apiClient.get<any>(`/threatlens/enrich/${encodeURIComponent(value)}`),
 };
 
+// ─── System Settings API ──────────────────────────────────────────────────────
+
+export type SystemSettings = Record<string, string>;
+
+export const settingsApi = {
+  getSystem: () =>
+    apiClient.get<{ settings: SystemSettings }>("/settings/system"),
+  patchSystem: (updates: SystemSettings) =>
+    apiClient.patch<{ ok: boolean }>("/settings/system", updates),
+  testEmail: (to?: string) =>
+    apiClient.post<{ ok: boolean; message: string }>("/settings/notifications/test-email", { to }),
+  testSlack: () =>
+    apiClient.post<{ ok: boolean; message: string }>("/settings/notifications/test-slack", {}),
+  getThreatLensStatus: () =>
+    apiClient.get<{ url: string; apiKeySet: boolean }>("/settings/integrations/threatlens"),
+  testThreatLens: () =>
+    apiClient.post<{ ok: boolean; latencyMs: number; body?: any }>("/settings/integrations/threatlens/test", {}),
+};
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface AuthUser {

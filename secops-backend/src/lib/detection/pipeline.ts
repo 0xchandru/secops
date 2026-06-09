@@ -8,6 +8,7 @@ import type { NormalizedEvent } from "./types";
 import { broadcastAlert } from "../websocket";
 import { enqueueLog, isRedisAvailable, incrementEps } from "../redis";
 import { notifyByRole } from "../notifications";
+import { notifyAlertCreated } from "../notification-service";
 
 let engineLoaded = false;
 let engineLoading = false;
@@ -259,6 +260,17 @@ export async function processLogRecord(logId: string, raw: string, sourceType: s
             link: `/alerts/${created.id}`,
             metadata: { alertId: created.id, alertCode, severity: ta.severity },
           });
+          // Email / Slack notification — fire and forget
+          setImmediate(() =>
+            notifyAlertCreated({
+              id: created.id,
+              alertCode: created.alertCode,
+              title: created.title,
+              severity: created.severity,
+              source: created.sourceHost,
+              mitreTactic: created.mitreTactic,
+            }).catch(() => {})
+          );
           // Auto-enrich IOCs — fire and forget, never blocks alert creation
           setImmediate(() => enrichAlertIocs(created.id).catch(() => {}));
         }
