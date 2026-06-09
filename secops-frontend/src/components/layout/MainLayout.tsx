@@ -88,11 +88,11 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
             setWsAlertToast(title);
             setTimeout(() => setWsAlertToast(null), 5000);
           }
-        } catch {}
+        } catch { }
       };
       ws.onclose = () => { setWsConnected(false); wsRef.current = null; wsReconnectRef.current = setTimeout(connectWs, 6000); };
       ws.onerror = () => ws.close();
-    } catch {}
+    } catch { }
   }, [isAuthenticated, queryClient]);
 
   useEffect(() => {
