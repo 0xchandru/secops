@@ -1,10 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ingestApi, logsApi } from '@/lib/api';
+import { ingestApi, logsApi, forwardersApi } from '@/lib/api';
+import type { Forwarder } from '@/lib/api';
 import {
   Database, Upload, CheckCircle2, AlertTriangle, XCircle, FileText,
   Activity, Wifi, Server, Plus, ChevronDown, ChevronRight, Eye, RefreshCw, Loader2,
-  Terminal, BarChart3, RotateCcw, Send
+  Terminal, BarChart3, RotateCcw, Send, Radio, Trash2, Copy, Monitor, Clock
 } from 'lucide-react';
 
 type IngestionStatus = 'idle' | 'parsing' | 'uploading' | 'success' | 'error';
@@ -107,6 +108,8 @@ export default function LogIngestionPage() {
   const [rawResult, setRawResult] = useState<{ inserted: number; source: string } | null>(null);
   const [rawError, setRawError] = useState<string | null>(null);
   const [sourcetype, setSourcetype] = useState('');
+  const [activeTab, setActiveTab] = useState<'overview' | 'forwarders'>('overview');
+  const [expandedForwarder, setExpandedForwarder] = useState<string | null>(null);
 
   const { data: logsData, dataUpdatedAt } = useQuery({
     queryKey: ['logs', { limit: 20, page: 1 }],
@@ -152,6 +155,17 @@ export default function LogIngestionPage() {
       queryClient.invalidateQueries({ queryKey: ['logs'] });
       queryClient.invalidateQueries({ queryKey: ['ingest-stats'] });
     },
+  });
+
+  const { data: forwardersData } = useQuery({
+    queryKey: ['forwarders'],
+    queryFn: () => forwardersApi.list().then(r => r.data),
+    refetchInterval: 15000,
+  });
+
+  const deleteForwarderMutation = useMutation({
+    mutationFn: (id: string) => forwardersApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['forwarders'] }),
   });
 
   useEffect(() => {
@@ -221,7 +235,44 @@ export default function LogIngestionPage() {
           <p className="text-muted-foreground mt-1">Upload log files, manage pipelines, and monitor data flow in real time.</p>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* Tab bar */}
+        <div className="flex gap-1 border-b border-border">
+          {([
+            { id: 'overview', label: 'Overview', icon: Database },
+            { id: 'forwarders', label: 'Forwarders', icon: Radio, count: forwardersData?.total },
+          ] as const).map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                activeTab === tab.id
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              {tab.label}
+              {'count' in tab && tab.count !== undefined && tab.count > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-primary/15 text-primary">
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'forwarders' && (
+          <ForwardersTab
+            forwarders={forwardersData?.forwarders ?? []}
+            expandedForwarder={expandedForwarder}
+            setExpandedForwarder={setExpandedForwarder}
+            onDelete={(id) => deleteForwarderMutation.mutate(id)}
+            isDeleting={deleteForwarderMutation.isPending}
+          />
+        )}
+
+        {activeTab === 'overview' && (
+        <><div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           {[
             { label: 'Total Indexed', value: (pipelineStats?.total ?? totalLogs).toLocaleString(), color: 'text-primary' },
             { label: 'Last 24 Hours', value: (pipelineStats?.last24h ?? 0).toLocaleString(), color: 'text-cyan-400' },
@@ -602,7 +653,245 @@ export default function LogIngestionPage() {
             </div>
           </div>
         </div>
-      </div>
+      </>)}
+    </div>
     </>
+  );
+}
+
+// ─── ForwardersTab component ─────────────────────────────────────────────────
+
+function timeSince(dateStr: string | null): string {
+  if (!dateStr) return 'never';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+function ForwardersTab({
+  forwarders,
+  expandedForwarder,
+  setExpandedForwarder,
+  onDelete,
+  isDeleting,
+}: {
+  forwarders: Forwarder[];
+  expandedForwarder: string | null;
+  setExpandedForwarder: (id: string | null) => void;
+  onDelete: (id: string) => void;
+  isDeleting: boolean;
+}) {
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copyCmd = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Live forwarder table */}
+      <div className="bg-card border border-border rounded-xl shadow-lg overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-primary" />
+            <h3 className="font-semibold text-foreground">Registered Forwarders</h3>
+            <span className="text-xs text-muted-foreground ml-1">auto-refreshes every 15s</span>
+          </div>
+          <span className="text-xs text-muted-foreground">{forwarders.length} registered</span>
+        </div>
+
+        {forwarders.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <Radio className="w-10 h-10 mb-3 opacity-30" />
+            <p className="font-medium text-foreground mb-1">No forwarders registered yet</p>
+            <p className="text-xs text-center max-w-sm">
+              Install the SecOps Forwarder on any server to start tailing log files and shipping events here automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {forwarders.map(fw => {
+              const isExpanded = expandedForwarder === fw.id;
+              const monitors = (fw.monitors ?? []) as Array<{ path: string; sourcetype?: string; offset: number; eventsSent: number; eps: number }>;
+              return (
+                <div key={fw.id}>
+                  <div
+                    className="flex items-center gap-4 px-5 py-4 hover:bg-secondary/20 cursor-pointer transition-colors"
+                    onClick={() => setExpandedForwarder(isExpanded ? null : fw.id)}
+                  >
+                    <div className="relative flex h-3 w-3 shrink-0">
+                      {fw.online ? (
+                        <>
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+                        </>
+                      ) : (
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-zinc-600" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-foreground">{fw.name}</span>
+                        <span className="text-xs text-muted-foreground font-mono bg-secondary/50 px-1.5 py-0.5 rounded">v{fw.version}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${fw.online ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/20 text-zinc-400'}`}>
+                          {fw.online ? 'Online' : 'Offline'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1"><Server className="w-3 h-3" />{fw.host}</span>
+                        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{timeSince(fw.lastHeartbeatAt)}</span>
+                        <span className="flex items-center gap-1"><Monitor className="w-3 h-3" />{monitors.length} monitor{monitors.length !== 1 ? 's' : ''}</span>
+                      </div>
+                    </div>
+
+                    <div className="hidden sm:flex items-center gap-6 text-right shrink-0">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Events Sent</div>
+                        <div className="font-mono font-semibold text-sm text-foreground">{fw.totalEventsSent.toLocaleString()}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">EPS</div>
+                        <div className="font-mono font-semibold text-sm text-primary">{fw.eps.toFixed(1)}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={e => { e.stopPropagation(); if (confirm(`Remove forwarder "${fw.name}"?`)) onDelete(fw.id); }}
+                        disabled={isDeleting}
+                        className="p-1.5 text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/10"
+                        title="Remove forwarder"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      {isExpanded ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="border-t border-border bg-secondary/10 px-5 py-4">
+                      {monitors.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No monitor data reported yet.</p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-muted-foreground border-b border-border/50">
+                                <th className="text-left pb-2 pr-4 font-medium">File Path</th>
+                                <th className="text-left pb-2 pr-4 font-medium">Sourcetype</th>
+                                <th className="text-right pb-2 pr-4 font-medium">Offset</th>
+                                <th className="text-right pb-2 pr-4 font-medium">Events</th>
+                                <th className="text-right pb-2 font-medium">EPS</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/30">
+                              {monitors.map((m, i) => (
+                                <tr key={i} className="text-foreground">
+                                  <td className="py-2 pr-4 font-mono text-[11px] text-muted-foreground max-w-xs truncate">{m.path}</td>
+                                  <td className="py-2 pr-4">
+                                    <span className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-mono">{m.sourcetype ?? 'generic'}</span>
+                                  </td>
+                                  <td className="py-2 pr-4 text-right font-mono">{(m.offset ?? 0).toLocaleString()}</td>
+                                  <td className="py-2 pr-4 text-right font-mono">{(m.eventsSent ?? 0).toLocaleString()}</td>
+                                  <td className="py-2 text-right font-mono text-primary">{(m.eps ?? 0).toFixed(1)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Setup guide */}
+      <div className="bg-card border border-border rounded-xl shadow-lg p-5">
+        <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Terminal className="w-4 h-4 text-primary" /> Forwarder Setup Guide
+        </h3>
+        <div className="space-y-5">
+          {[
+            {
+              step: '1',
+              title: 'Clone the forwarder',
+              code: 'git clone <your-repo-url>\ncd secops-forwarder\nnpm install && npm run build',
+            },
+            {
+              step: '2',
+              title: 'Configure outputs.conf',
+              code: `# conf/outputs.conf\n[secops]\nserver = ${window.location.origin}\ntoken = YOUR_API_TOKEN\nname = my-forwarder-1\nbatchSize = 100`,
+            },
+            {
+              step: '3',
+              title: 'Configure inputs.conf',
+              code: '# conf/inputs.conf\n[monitor:///var/log/auth.log]\nsourcetype = linux_secure\nindex = main',
+            },
+            {
+              step: '4',
+              title: 'Validate and start',
+              code: 'npx secops-forwarder test-config\nnpx secops-forwarder start --verbose',
+            },
+          ].map(({ step, title, code }) => (
+            <div key={step} className="flex gap-4">
+              <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/15 text-primary text-xs font-bold flex items-center justify-center mt-0.5">
+                {step}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground mb-2">{title}</p>
+                <div className="relative group">
+                  <pre className="bg-[#050810] border border-border rounded-lg p-3 text-[11px] font-mono text-emerald-400 overflow-x-auto whitespace-pre">{code}</pre>
+                  <button
+                    onClick={() => copyCmd(code, step)}
+                    className="absolute top-2 right-2 p-1.5 bg-secondary/60 hover:bg-secondary rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Copy"
+                  >
+                    {copied === step ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-muted-foreground" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* CLI reference */}
+      <div className="bg-card border border-border rounded-xl shadow-lg p-5">
+        <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Activity className="w-4 h-4 text-primary" /> CLI Reference
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {[
+            { cmd: 'secops-forwarder start', desc: 'Start tailing monitored files and forwarding events', icon: Radio },
+            { cmd: 'secops-forwarder status', desc: 'Show checkpoint positions and events sent per monitor', icon: BarChart3 },
+            { cmd: 'secops-forwarder test-config', desc: 'Validate all .conf files and report errors/warnings', icon: CheckCircle2 },
+          ].map(({ cmd, desc, icon: Icon }) => (
+            <div key={cmd} className="bg-secondary/30 border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon className="w-4 h-4 text-primary" />
+                <code className="text-xs font-mono text-foreground">{cmd}</code>
+              </div>
+              <p className="text-xs text-muted-foreground">{desc}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Options: </span>
+          <code className="font-mono">--config-dir &lt;path&gt;</code> (default: ./conf) ·{' '}
+          <code className="font-mono">--data-dir &lt;path&gt;</code> (default: ./.secops-forwarder) ·{' '}
+          <code className="font-mono">--verbose</code> · <code className="font-mono">--version</code>
+        </div>
+      </div>
+    </div>
   );
 }

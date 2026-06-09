@@ -329,6 +329,45 @@ export const ingestApi = {
     apiClient.post<{ reprocessed: number; status: string }>("/ingest/reprocess", opts),
 };
 
+// ─── Forwarders ──────────────────────────────────────────────────────────────
+
+export interface ForwarderMonitor {
+  path: string;
+  sourcetype?: string;
+  offset: number;
+  eventsSent: number;
+  eps: number;
+}
+
+export interface Forwarder {
+  id: string;
+  name: string;
+  host: string;
+  version: string;
+  lastHeartbeatAt: string | null;
+  totalEventsSent: number;
+  eps: number;
+  monitors: ForwarderMonitor[];
+  status: string;
+  online: boolean;
+  createdAt: string;
+}
+
+export const forwardersApi = {
+  list: () =>
+    apiClient.get<{ forwarders: Forwarder[]; total: number }>("/forwarders"),
+  delete: (id: string) =>
+    apiClient.delete(`/forwarders/${id}`),
+  heartbeat: (data: {
+    name: string;
+    host: string;
+    version?: string;
+    totalEventsSent?: number;
+    eps?: number;
+    monitors?: ForwarderMonitor[];
+  }) => apiClient.post("/forwarders/heartbeat", data),
+};
+
 // ─── Assets ──────────────────────────────────────────────────────────────────
 
 export const assetsApi = {
