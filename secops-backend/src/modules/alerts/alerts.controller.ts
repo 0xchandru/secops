@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import * as alertsService from "./alerts.service";
 import { logAuditEvent } from "../../lib/audit";
-import { notifyAlertAssigned } from "../../lib/notification-service";
+import { notifyAlertAssigned, notifyAlertStatusChanged } from "../../lib/notification-service";
 import { db, usersTable } from "../../db";
 import { eq } from "drizzle-orm";
 import type { AlertAction } from "../../lib/alert-state-machine";
@@ -103,6 +103,20 @@ export async function updateStatus(req: Request, res: Response): Promise<void> {
   }
   if (!alert) { res.status(404).json({ error: "Alert not found" }); return; }
   await logAuditEvent(req, "alerts.status_update", { resource: "alerts", resourceId: id, metadata: { status, previousStatus: currentStatus } });
+
+  // Slack notification on escalation or resolution — fire and forget
+  setImmediate(() =>
+    notifyAlertStatusChanged({
+      id,
+      alertCode: (alert as any).alertCode ?? null,
+      title: (alert as any).title ?? id,
+      severity: (alert as any).severity ?? "unknown",
+      status,
+      previousStatus: currentStatus,
+      actor: req.user!.displayName ?? req.user!.username,
+    }).catch(() => {})
+  );
+
   res.json({ alert });
 }
 

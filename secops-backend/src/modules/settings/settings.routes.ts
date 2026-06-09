@@ -4,35 +4,36 @@ import { requireAuth } from "../../middlewares/auth.middleware";
 import { can } from "../../middlewares/rbac.middleware";
 import { db, systemSettingsTable } from "../../db";
 import { eq } from "drizzle-orm";
-import { encrypt, decrypt } from "../../lib/crypto-utils";
 import { sendEmail, sendSlack, getEmailConfig, getSlackConfig, getThreatLensConfig } from "../../lib/notification-service";
 import nodemailer from "nodemailer";
 
 const router = Router();
 
-const SENSITIVE_KEYS = new Set([
-  "notifications.email.password",
-  "notifications.slack.webhookUrl",
-  "integrations.threatlens.apiKey",
-]);
+// Sensitive values are stored ONLY in process.env (Replit secrets store),
+// never in the database. The PATCH endpoint sets process.env at runtime —
+// changes persist for the current server session. For permanent storage,
+// set the corresponding Replit Secret: SMTP_PASSWORD, SLACK_WEBHOOK_URL,
+// THREATLENS_API_KEY.
 
-const ALLOWED_KEYS = new Set([
+const SENSITIVE_ENV_MAP: Record<string, string> = {
+  "notifications.email.password": "SMTP_PASSWORD",
+  "notifications.slack.webhookUrl": "SLACK_WEBHOOK_URL",
+  "integrations.threatlens.apiKey": "THREATLENS_API_KEY",
+};
+
+const DB_KEYS = new Set([
   "notifications.email.enabled",
   "notifications.email.host",
   "notifications.email.port",
   "notifications.email.username",
-  "notifications.email.password",
   "notifications.email.from",
   "notifications.slack.enabled",
-  "notifications.slack.webhookUrl",
   "integrations.threatlens.url",
-  "integrations.threatlens.apiKey",
 ]);
 
-async function upsertSetting(key: string, value: string, updatedBy: string): Promise<void> {
-  const isSensitive = SENSITIVE_KEYS.has(key);
-  const storedValue = isSensitive ? encrypt(value) : value;
+const ALL_ALLOWED = new Set([...DB_KEYS, ...Object.keys(SENSITIVE_ENV_MAP)]);
 
+async function upsertSetting(key: string, value: string, updatedBy: string): Promise<void> {
   const existing = await db
     .select({ key: systemSettingsTable.key })
     .from(systemSettingsTable)
@@ -42,77 +43,76 @@ async function upsertSetting(key: string, value: string, updatedBy: string): Pro
   if (existing.length > 0) {
     await db
       .update(systemSettingsTable)
-      .set({ value: storedValue, encrypted: isSensitive, updatedAt: new Date(), updatedBy })
+      .set({ value, encrypted: false, updatedAt: new Date(), updatedBy })
       .where(eq(systemSettingsTable.key, key));
   } else {
-    await db.insert(systemSettingsTable).values({
-      key,
-      value: storedValue,
-      encrypted: isSensitive,
-      updatedBy,
-    });
+    await db.insert(systemSettingsTable).values({ key, value, encrypted: false, updatedBy });
   }
 }
 
-async function readSetting(key: string): Promise<string | null> {
+async function readDbSetting(key: string): Promise<string | null> {
   const row = await db
     .select()
     .from(systemSettingsTable)
     .where(eq(systemSettingsTable.key, key))
     .limit(1);
-  if (!row[0]) return null;
-  return row[0].encrypted ? decrypt(row[0].value) : row[0].value;
+  return row[0]?.value ?? null;
 }
 
-// GET /api/settings/system — read all system settings (admin only)
-// Sensitive values returned as masked placeholder (not the real value)
+// GET /api/settings/system — returns DB settings + env-var status for secrets
 router.get("/settings/system", requireAuth, can("users:manage"), async (_req: Request, res: Response) => {
   const rows = await db.select().from(systemSettingsTable);
-  const settings: Record<string, string | boolean | number> = {};
+  const settings: Record<string, string> = {};
 
   for (const row of rows) {
-    if (!ALLOWED_KEYS.has(row.key)) continue;
-    if (SENSITIVE_KEYS.has(row.key)) {
-      // Return a flag so UI knows whether it's set, not the actual value
-      const val = decrypt(row.value);
-      settings[row.key] = val ? "••••••••" : "";
-    } else {
-      settings[row.key] = row.value;
-    }
+    if (!DB_KEYS.has(row.key)) continue;
+    settings[row.key] = row.value;
+  }
+
+  // For sensitive keys, return whether the env var is currently set (not the value)
+  for (const [settingKey, envVar] of Object.entries(SENSITIVE_ENV_MAP)) {
+    settings[settingKey] = process.env[envVar] ? "••••••••" : "";
   }
 
   res.json({ settings });
 });
 
-// PATCH /api/settings/system — update system settings (admin only)
+// PATCH /api/settings/system — saves non-sensitive to DB; sensitive to process.env
 router.patch("/settings/system", requireAuth, can("users:manage"), async (req: Request, res: Response) => {
   const updates = req.body as Record<string, string>;
   const userId = req.user!.userId;
 
   for (const [key, value] of Object.entries(updates)) {
-    if (!ALLOWED_KEYS.has(key)) continue;
+    if (!ALL_ALLOWED.has(key)) continue;
     if (typeof value !== "string") continue;
-    // Skip sentinel mask value — means "unchanged"
-    if (value === "••••••••") continue;
-    await upsertSetting(key, value, userId);
+
+    const envVar = SENSITIVE_ENV_MAP[key];
+    if (envVar) {
+      // Skip unchanged sentinel values
+      if (value === "••••••••" || value === "") continue;
+      // Store in process.env (session-scoped — also configure as Replit Secret for persistence)
+      process.env[envVar] = value;
+    } else {
+      await upsertSetting(key, value, userId);
+    }
   }
 
   res.json({ ok: true });
 });
 
-// POST /api/settings/notifications/test-email — send a test email
+// POST /api/settings/notifications/test-email
 router.post("/settings/notifications/test-email", requireAuth, can("users:manage"), async (req: Request, res: Response) => {
   const { to } = req.body as { to?: string };
   const cfg = await getEmailConfig();
 
   if (!cfg) {
-    res.status(400).json({ error: "Email is not configured. Please save SMTP settings first." });
+    res.status(400).json({ error: "Email is not configured. Enable it and save SMTP settings first." });
     return;
   }
 
   const recipient = to ?? cfg.from;
   if (!recipient) {
-    res.status(400).json({ error: "No recipient email address available" });
+    res.status(400).json({ error: "No recipient address available. Set the From Address field." });
     return;
   }
 
@@ -152,12 +152,11 @@ router.post("/settings/notifications/test-email", requireAuth, can("users:manage
   res.json({ ok: true, message: `Test email sent to ${recipient}` });
 });
 
-// POST /api/settings/notifications/test-slack — send a test Slack message
+// POST /api/settings/notifications/test-slack
 router.post("/settings/notifications/test-slack", requireAuth, can("users:manage"), async (_req: Request, res: Response) => {
   const cfg = await getSlackConfig();
-
   if (!cfg) {
-    res.status(400).json({ error: "Slack is not configured. Please save the webhook URL first." });
+    res.status(400).json({ error: "Slack is not configured. Enable it and set the webhook URL first." });
     return;
   }
 
@@ -168,7 +167,7 @@ router.post("/settings/notifications/test-slack", requireAuth, can("users:manage
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "✅ *SecOps Console — Slack Notifications Working*\nYour Slack webhook is configured correctly. You will now receive alert notifications here.",
+          text: "✅ *SecOps Console — Slack Notifications Working*\nYour Slack webhook is configured correctly. Alert notifications will be delivered here.",
         },
       },
       {
@@ -186,21 +185,16 @@ router.post("/settings/notifications/test-slack", requireAuth, can("users:manage
   res.json({ ok: true, message: "Test message sent to Slack" });
 });
 
-// GET /api/settings/integrations/threatlens — read ThreatLens config status
+// GET /api/settings/integrations/threatlens — ThreatLens config status
 router.get("/settings/integrations/threatlens", requireAuth, can("users:manage"), async (_req: Request, res: Response) => {
-  const url = await readSetting("integrations.threatlens.url");
-  const hasKey = !!(await readSetting("integrations.threatlens.apiKey"));
-
-  res.json({
-    url: url ?? "",
-    apiKeySet: hasKey,
-  });
+  const url = await readDbSetting("integrations.threatlens.url");
+  const hasKey = !!process.env["THREATLENS_API_KEY"];
+  res.json({ url: url ?? "", apiKeySet: hasKey });
 });
 
-// POST /api/settings/integrations/threatlens/test — test ThreatLens connectivity
+// POST /api/settings/integrations/threatlens/test
 router.post("/settings/integrations/threatlens/test", requireAuth, can("users:manage"), async (_req: Request, res: Response) => {
   const cfg = await getThreatLensConfig();
-
   if (!cfg) {
     res.status(400).json({ error: "ThreatLens URL is not configured." });
     return;
@@ -216,7 +210,6 @@ router.post("/settings/integrations/threatlens/test", requireAuth, can("users:ma
     }).finally(() => clearTimeout(timer));
 
     const latencyMs = Date.now() - start;
-
     if (!resp.ok) {
       res.status(502).json({ error: `ThreatLens responded ${resp.status}`, latencyMs });
       return;

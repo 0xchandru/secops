@@ -191,7 +191,10 @@ function ProfileTab({ onSave }: { onSave: (msg: string) => void }) {
 
 function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
   const qc = useQueryClient();
+  const { can } = useAuthStore();
+  const isAdmin = can('users:manage');
 
+  // ── Personal prefs ──────────────────────────────────────────────────────
   const { data: settingsData, isLoading } = useQuery({
     queryKey: ['me-settings'],
     queryFn: () => meApi.getSettings().then(r => r.data.settings),
@@ -207,7 +210,7 @@ function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
     if (settingsData?.notifications) setNotifs(settingsData.notifications);
   }, [settingsData]);
 
-  const mutation = useMutation({
+  const prefMutation = useMutation({
     mutationFn: () => meApi.updateSettings({ notifications: notifs }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['me-settings'] });
@@ -215,12 +218,128 @@ function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
     },
   });
 
+  // ── Admin channel config ────────────────────────────────────────────────
+  const { data: sysCfg } = useQuery({
+    queryKey: ['system-settings'],
+    queryFn: () => settingsApi.getSystem().then(r => r.data.settings),
+    enabled: isAdmin,
+  });
+
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailHost, setEmailHost] = useState('');
+  const [emailPort, setEmailPort] = useState('587');
+  const [emailUser, setEmailUser] = useState('');
+  const [emailPass, setEmailPass] = useState('');
+  const [emailFrom, setEmailFrom] = useState('');
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackWebhook, setSlackWebhook] = useState('');
+  const [emailTestStatus, setEmailTestStatus] = useState<'idle'|'testing'|'ok'|'error'>('idle');
+  const [emailTestMsg, setEmailTestMsg] = useState('');
+  const [slackTestStatus, setSlackTestStatus] = useState<'idle'|'testing'|'ok'|'error'>('idle');
+  const [slackTestMsg, setSlackTestMsg] = useState('');
+
+  useEffect(() => {
+    if (!sysCfg) return;
+    setEmailEnabled(sysCfg['notifications.email.enabled'] === 'true');
+    setEmailHost(sysCfg['notifications.email.host'] ?? '');
+    setEmailPort(sysCfg['notifications.email.port'] ?? '587');
+    setEmailUser(sysCfg['notifications.email.username'] ?? '');
+    setEmailPass(sysCfg['notifications.email.password'] ?? '');
+    setEmailFrom(sysCfg['notifications.email.from'] ?? '');
+    setSlackEnabled(sysCfg['notifications.slack.enabled'] === 'true');
+    setSlackWebhook(sysCfg['notifications.slack.webhookUrl'] ?? '');
+  }, [sysCfg]);
+
+  const channelMutation = useMutation({
+    mutationFn: () => settingsApi.patchSystem({
+      'notifications.email.enabled': String(emailEnabled),
+      'notifications.email.host': emailHost,
+      'notifications.email.port': emailPort,
+      'notifications.email.username': emailUser,
+      'notifications.email.password': emailPass,
+      'notifications.email.from': emailFrom,
+      'notifications.slack.enabled': String(slackEnabled),
+      'notifications.slack.webhookUrl': slackWebhook,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['system-settings'] });
+      onSave('Channel settings saved');
+    },
+    onError: () => onSave('Failed to save channel settings'),
+  });
+
+  const testEmail = async () => {
+    setEmailTestStatus('testing'); setEmailTestMsg('');
+    try {
+      const r = await settingsApi.testEmail();
+      setEmailTestStatus('ok'); setEmailTestMsg(r.data.message ?? 'Test sent');
+    } catch (e: any) {
+      setEmailTestStatus('error'); setEmailTestMsg(e.response?.data?.error ?? 'Test failed');
+    }
+  };
+
+  const testSlack = async () => {
+    setSlackTestStatus('testing'); setSlackTestMsg('');
+    try {
+      await settingsApi.testSlack();
+      setSlackTestStatus('ok'); setSlackTestMsg('Message delivered');
+    } catch (e: any) {
+      setSlackTestStatus('error'); setSlackTestMsg(e.response?.data?.error ?? 'Test failed');
+    }
+  };
+
   const toggle = (k: keyof UserSettings['notifications']) => () => setNotifs(n => ({ ...n, [k]: !n[k] }));
-  const Toggle = ({ id }: { id: keyof UserSettings['notifications'] }) => (
+  const PrefToggle = ({ id }: { id: keyof UserSettings['notifications'] }) => (
     <button aria-label={`Toggle ${id}`} onClick={toggle(id)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${notifs[id] ? 'bg-primary' : 'bg-secondary border border-border'}`}>
       <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${notifs[id] ? 'translate-x-4' : 'translate-x-0.5'}`} />
     </button>
   );
+
+  const CfgToggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
+    <button type="button" onClick={() => onChange(!checked)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${checked ? 'bg-primary' : 'bg-secondary border border-border'}`}>
+      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
+    </button>
+  );
+
+  const SecretField = ({ label, value, onChange, placeholder, envVar }: {
+    label: string; value: string; onChange: (v: string) => void;
+    placeholder?: string; envVar: string;
+  }) => {
+    const [show, setShow] = useState(false);
+    const isSet = value === '••••••••';
+    return (
+      <div>
+        <label className="block text-xs font-semibold text-muted-foreground mb-1.5">{label}</label>
+        <div className="relative">
+          <input
+            type={show ? 'text' : 'password'}
+            value={isSet && !show ? '' : value}
+            onChange={e => onChange(e.target.value)}
+            placeholder={isSet ? '(currently set — enter new value to change)' : placeholder}
+            className="w-full bg-input border border-border rounded-lg px-3 py-2 pr-10 text-sm text-foreground font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          />
+          <button type="button" onClick={() => setShow(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+          <Lock className="w-3 h-3 shrink-0" />
+          Stored as Replit Secret: <code className="font-mono bg-secondary px-1 rounded">{envVar}</code>
+          {isSet && <span className="text-emerald-400 ml-1">● configured</span>}
+        </p>
+      </div>
+    );
+  };
+
+  const TestBar = ({ status, msg }: { status: 'idle'|'testing'|'ok'|'error'; msg: string }) => {
+    if (status === 'idle') return null;
+    return (
+      <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg mt-1 ${status === 'ok' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : status === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-secondary text-muted-foreground border border-border'}`}>
+        {status === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : status === 'ok' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+        {msg || (status === 'testing' ? 'Testing…' : '')}
+      </div>
+    );
+  };
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
@@ -228,13 +347,109 @@ function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
 
   return (
     <div>
-      <h2 className="text-xl font-bold text-foreground mb-6">Notification Preferences</h2>
+      <h2 className="text-xl font-bold text-foreground mb-6">Notifications</h2>
 
-      {/* Alert Channels */}
+      {/* ── Admin-only channel config ──────────────────────────────────────── */}
+      {isAdmin && (
+        <>
+          {/* Email SMTP */}
+          <div className="mb-5 bg-secondary/20 border border-border rounded-xl overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border/50 bg-secondary/30">
+              <div className="w-7 h-7 rounded-lg bg-blue-500/15 flex items-center justify-center">
+                <Mail className="w-3.5 h-3.5 text-blue-400" />
+              </div>
+              <h3 className="font-semibold text-sm text-foreground flex-1">Email (SMTP)</h3>
+              <CfgToggle checked={emailEnabled} onChange={setEmailEnabled} />
+            </div>
+            {emailEnabled && (
+              <div className="p-5 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5">SMTP Host</label>
+                    <input value={emailHost} onChange={e => setEmailHost(e.target.value)} placeholder="smtp.example.com" className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Port</label>
+                    <input value={emailPort} onChange={e => setEmailPort(e.target.value)} placeholder="587" className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+                    <p className="text-[10px] text-muted-foreground mt-1">587 STARTTLS · 465 SSL · 25 plain</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5">Username</label>
+                    <input value={emailUser} onChange={e => setEmailUser(e.target.value)} placeholder="alerts@example.com" className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+                  </div>
+                  <SecretField label="Password" value={emailPass} onChange={setEmailPass} placeholder="SMTP password" envVar="SMTP_PASSWORD" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1.5">From Address</label>
+                  <input value={emailFrom} onChange={e => setEmailFrom(e.target.value)} placeholder="SecOps Console <alerts@example.com>" className="w-full bg-input border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" />
+                </div>
+                <div className="flex items-center gap-3 pt-1">
+                  <button onClick={testEmail} disabled={emailTestStatus === 'testing' || !emailHost} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50">
+                    {emailTestStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    Send Test Email
+                  </button>
+                </div>
+                <TestBar status={emailTestStatus} msg={emailTestMsg} />
+              </div>
+            )}
+            {!emailEnabled && (
+              <div className="px-5 py-3 text-xs text-muted-foreground">Enable to configure SMTP delivery for high/critical alert emails.</div>
+            )}
+          </div>
+
+          {/* Slack */}
+          <div className="mb-5 bg-secondary/20 border border-border rounded-xl overflow-hidden">
+            <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border/50 bg-secondary/30">
+              <div className="w-7 h-7 rounded-lg bg-purple-500/15 flex items-center justify-center">
+                <Webhook className="w-3.5 h-3.5 text-purple-400" />
+              </div>
+              <h3 className="font-semibold text-sm text-foreground flex-1">Slack Incoming Webhook</h3>
+              <CfgToggle checked={slackEnabled} onChange={setSlackEnabled} />
+            </div>
+            {slackEnabled && (
+              <div className="p-5 space-y-3">
+                <SecretField
+                  label="Webhook URL"
+                  value={slackWebhook}
+                  onChange={setSlackWebhook}
+                  placeholder="https://hooks.slack.com/services/T.../B.../..."
+                  envVar="SLACK_WEBHOOK_URL"
+                />
+                <div className="flex items-center gap-3 pt-1">
+                  <button onClick={testSlack} disabled={slackTestStatus === 'testing'} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50">
+                    {slackTestStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    Send Test Message
+                  </button>
+                </div>
+                <TestBar status={slackTestStatus} msg={slackTestMsg} />
+              </div>
+            )}
+            {!slackEnabled && (
+              <div className="px-5 py-3 text-xs text-muted-foreground">Enable to deliver alert messages to a Slack channel via incoming webhook.</div>
+            )}
+          </div>
+
+          <div className="flex justify-end mb-6">
+            <button onClick={() => channelMutation.mutate()} disabled={channelMutation.isPending} className="flex items-center gap-2 px-5 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 disabled:opacity-50">
+              {channelMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+              Save Channel Settings
+            </button>
+          </div>
+
+          <div className="h-px bg-border mb-6" />
+        </>
+      )}
+
+      {/* ── Per-user notification prefs ──────────────────────────────────── */}
+      <h3 className="text-sm font-semibold text-foreground mb-4">My Notification Preferences</h3>
+
+      {/* Delivery Channels */}
       <div className="mb-6">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
           <Zap className="w-3.5 h-3.5" /> Delivery Channels
-        </h3>
+        </h4>
         <div className="space-y-1 bg-secondary/20 border border-border rounded-xl p-4">
           {[
             { label: 'Email Alerts', desc: 'Receive alert notifications via email', id: 'emailAlerts' as const },
@@ -246,7 +461,7 @@ function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
                 <div className="text-sm font-medium text-foreground">{item.label}</div>
                 <div className="text-xs text-muted-foreground mt-0.5">{item.desc}</div>
               </div>
-              <Toggle id={item.id} />
+              <PrefToggle id={item.id} />
             </div>
           ))}
         </div>
@@ -254,9 +469,9 @@ function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
 
       {/* Alert Triggers */}
       <div className="mb-6">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
           <Bell className="w-3.5 h-3.5" /> Alert Triggers
-        </h3>
+        </h4>
         <div className="space-y-1 bg-secondary/20 border border-border rounded-xl p-4">
           {[
             { label: 'Critical Alerts Only', desc: 'Only receive notifications for critical severity', id: 'criticalOnly' as const },
@@ -268,7 +483,7 @@ function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
                 <div className="text-sm font-medium text-foreground">{item.label}</div>
                 <div className="text-xs text-muted-foreground mt-0.5">{item.desc}</div>
               </div>
-              <Toggle id={item.id} />
+              <PrefToggle id={item.id} />
             </div>
           ))}
         </div>
@@ -276,26 +491,27 @@ function NotificationsTab({ onSave }: { onSave: (msg: string) => void }) {
 
       {/* Reports */}
       <div className="mb-6">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
           <FileText className="w-3.5 h-3.5" /> Reports
-        </h3>
+        </h4>
         <div className="bg-secondary/20 border border-border rounded-xl p-4">
           <div className="flex items-center justify-between py-2">
             <div>
               <div className="text-sm font-medium text-foreground">Weekly Report</div>
               <div className="text-xs text-muted-foreground mt-0.5">Weekly SOC performance and coverage report</div>
             </div>
-            <Toggle id="weeklyReport" />
+            <PrefToggle id="weeklyReport" />
           </div>
         </div>
       </div>
+
       <div className="pt-4 mt-2 flex justify-end">
         <button
-          onClick={() => mutation.mutate()}
-          disabled={mutation.isPending}
+          onClick={() => prefMutation.mutate()}
+          disabled={prefMutation.isPending}
           className="px-6 py-2.5 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center gap-2"
         >
-          {mutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
+          {prefMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
           Save Preferences
         </button>
       </div>
@@ -965,30 +1181,12 @@ function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
   const { can } = useAuthStore();
   const isAdmin = can('users:manage');
 
-  // ─── Query / Mutation ───────────────────────────────────────────────────
   const { data: sysSettings, isLoading } = useQuery({
     queryKey: ['system-settings'],
     queryFn: () => settingsApi.getSystem().then(r => r.data.settings),
     enabled: isAdmin,
   });
 
-  // ─── Email state ────────────────────────────────────────────────────────
-  const [emailEnabled, setEmailEnabled] = useState(false);
-  const [emailHost, setEmailHost] = useState('');
-  const [emailPort, setEmailPort] = useState('587');
-  const [emailUser, setEmailUser] = useState('');
-  const [emailPass, setEmailPass] = useState('');
-  const [emailFrom, setEmailFrom] = useState('');
-  const [emailTestStatus, setEmailTestStatus] = useState<TestStatus>('idle');
-  const [emailTestMsg, setEmailTestMsg] = useState('');
-
-  // ─── Slack state ────────────────────────────────────────────────────────
-  const [slackEnabled, setSlackEnabled] = useState(false);
-  const [slackWebhook, setSlackWebhook] = useState('');
-  const [slackTestStatus, setSlackTestStatus] = useState<TestStatus>('idle');
-  const [slackTestMsg, setSlackTestMsg] = useState('');
-
-  // ─── ThreatLens state ───────────────────────────────────────────────────
   const [tlUrl, setTlUrl] = useState('');
   const [tlApiKey, setTlApiKey] = useState('');
   const [tlTestStatus, setTlTestStatus] = useState<TestStatus>('idle');
@@ -996,67 +1194,21 @@ function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
 
   useEffect(() => {
     if (!sysSettings) return;
-    setEmailEnabled(sysSettings['notifications.email.enabled'] === 'true');
-    setEmailHost(sysSettings['notifications.email.host'] ?? '');
-    setEmailPort(sysSettings['notifications.email.port'] ?? '587');
-    setEmailUser(sysSettings['notifications.email.username'] ?? '');
-    setEmailPass(sysSettings['notifications.email.password'] ?? '');
-    setEmailFrom(sysSettings['notifications.email.from'] ?? '');
-    setSlackEnabled(sysSettings['notifications.slack.enabled'] === 'true');
-    setSlackWebhook(sysSettings['notifications.slack.webhookUrl'] ?? '');
     setTlUrl(sysSettings['integrations.threatlens.url'] ?? '');
     setTlApiKey(sysSettings['integrations.threatlens.apiKey'] ?? '');
   }, [sysSettings]);
 
   const saveMutation = useMutation({
-    mutationFn: (updates: Record<string, string>) => settingsApi.patchSystem(updates),
+    mutationFn: () => settingsApi.patchSystem({
+      'integrations.threatlens.url': tlUrl,
+      'integrations.threatlens.apiKey': tlApiKey,
+    }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['system-settings'] });
-      onSave('Integration settings saved');
+      onSave('ThreatLens settings saved');
     },
     onError: () => onSave('Failed to save settings'),
   });
-
-  const saveAll = () => {
-    saveMutation.mutate({
-      'notifications.email.enabled': String(emailEnabled),
-      'notifications.email.host': emailHost,
-      'notifications.email.port': emailPort,
-      'notifications.email.username': emailUser,
-      'notifications.email.password': emailPass,
-      'notifications.email.from': emailFrom,
-      'notifications.slack.enabled': String(slackEnabled),
-      'notifications.slack.webhookUrl': slackWebhook,
-      'integrations.threatlens.url': tlUrl,
-      'integrations.threatlens.apiKey': tlApiKey,
-    });
-  };
-
-  const testEmail = async () => {
-    setEmailTestStatus('testing');
-    setEmailTestMsg('');
-    try {
-      const r = await settingsApi.testEmail();
-      setEmailTestStatus('ok');
-      setEmailTestMsg(r.data.message ?? 'Test email sent');
-    } catch (e: any) {
-      setEmailTestStatus('error');
-      setEmailTestMsg(e.response?.data?.error ?? 'Test failed');
-    }
-  };
-
-  const testSlack = async () => {
-    setSlackTestStatus('testing');
-    setSlackTestMsg('');
-    try {
-      await settingsApi.testSlack();
-      setSlackTestStatus('ok');
-      setSlackTestMsg('Message delivered to Slack');
-    } catch (e: any) {
-      setSlackTestStatus('error');
-      setSlackTestMsg(e.response?.data?.error ?? 'Test failed');
-    }
-  };
 
   const testThreatLens = async () => {
     setTlTestStatus('testing');
@@ -1084,17 +1236,6 @@ function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
     return <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
   }
 
-  const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
-    <button
-      type="button"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${checked ? 'bg-primary' : 'bg-secondary border border-border'}`}
-    >
-      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
-    </button>
-  );
-
   const TestBar = ({ status, msg }: { status: TestStatus; msg: string }) => {
     if (status === 'idle') return null;
     return (
@@ -1105,100 +1246,42 @@ function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
     );
   };
 
+  const apiKeyIsSet = tlApiKey === '••••••••';
+  const [showKey, setShowKey] = useState(false);
+
   return (
     <div>
       <h2 className="text-xl font-bold text-foreground mb-1">Integrations</h2>
-      <p className="text-sm text-muted-foreground mb-6">Configure email, Slack, and ThreatLens for alert delivery and enrichment.</p>
+      <p className="text-sm text-muted-foreground mb-6">Configure third-party integrations for IOC enrichment and threat intelligence.</p>
 
-      {/* Email SMTP */}
-      <SectionCard title="Email (SMTP)" icon={Mail} iconColor="bg-blue-500/15 text-blue-400">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium text-foreground">Enable Email Notifications</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Deliver alert emails for high/critical severity events</div>
-          </div>
-          <Toggle checked={emailEnabled} onChange={setEmailEnabled} />
-        </div>
-
-        {emailEnabled && (
-          <>
-            <div className="grid grid-cols-2 gap-3">
-              <FieldInput label="SMTP Host" value={emailHost} onChange={setEmailHost} placeholder="smtp.example.com" />
-              <FieldInput label="SMTP Port" value={emailPort} onChange={setEmailPort} placeholder="587" hint="587 = STARTTLS · 465 = SSL · 25 = plain" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <FieldInput label="Username" value={emailUser} onChange={setEmailUser} placeholder="alerts@example.com" />
-              <FieldInput label="Password" value={emailPass} onChange={setEmailPass} type="password" placeholder="SMTP password" />
-            </div>
-            <FieldInput label="From Address" value={emailFrom} onChange={setEmailFrom} placeholder="SecOps Console <alerts@example.com>" hint="Displayed as the sender of alert emails" />
-
-            <div className="flex items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={testEmail}
-                disabled={emailTestStatus === 'testing' || !emailHost}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50"
-              >
-                {emailTestStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                Send Test Email
-              </button>
-            </div>
-            <TestBar status={emailTestStatus} msg={emailTestMsg} />
-          </>
-        )}
-      </SectionCard>
-
-      {/* Slack */}
-      <SectionCard title="Slack" icon={Webhook} iconColor="bg-purple-500/15 text-purple-400">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium text-foreground">Enable Slack Notifications</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Post alert messages to a Slack channel via incoming webhook</div>
-          </div>
-          <Toggle checked={slackEnabled} onChange={setSlackEnabled} />
-        </div>
-
-        {slackEnabled && (
-          <>
-            <FieldInput
-              label="Webhook URL"
-              value={slackWebhook}
-              onChange={setSlackWebhook}
-              type="password"
-              placeholder="https://hooks.slack.com/services/T.../B.../..."
-              hint="Create an Incoming Webhook in your Slack App settings"
-              monospace
-            />
-            <div className="flex items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={testSlack}
-                disabled={slackTestStatus === 'testing' || !slackWebhook}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-secondary border border-border rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50"
-              >
-                {slackTestStatus === 'testing' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                Send Test Message
-              </button>
-            </div>
-            <TestBar status={slackTestStatus} msg={slackTestMsg} />
-          </>
-        )}
-      </SectionCard>
-
-      {/* ThreatLens */}
       <SectionCard title="ThreatLens IOC Enrichment" icon={ShieldCheck} iconColor="bg-emerald-500/15 text-emerald-400">
         <p className="text-xs text-muted-foreground -mt-1 mb-1">
           ThreatLens provides real-time IOC scoring and MITRE technique attribution. Configure the connection below.
         </p>
         <FieldInput label="ThreatLens API URL" value={tlUrl} onChange={setTlUrl} placeholder="http://threatlens:8000" monospace />
-        <FieldInput
-          label="API Key (optional)"
-          value={tlApiKey}
-          onChange={setTlApiKey}
-          type="password"
-          placeholder="sk-…"
-          hint="Leave blank if your ThreatLens instance does not require authentication"
-        />
+
+        {/* API Key — env-var backed secret */}
+        <div>
+          <label className="block text-xs font-semibold text-muted-foreground mb-1.5">API Key <span className="font-normal">(optional)</span></label>
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKeyIsSet && !showKey ? '' : tlApiKey}
+              onChange={e => setTlApiKey(e.target.value)}
+              placeholder={apiKeyIsSet ? '(currently set — enter new value to change)' : 'sk-… (leave blank if unauthenticated)'}
+              className="w-full bg-input border border-border rounded-lg px-3 py-2 pr-10 text-sm text-foreground font-mono focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+            />
+            <button type="button" onClick={() => setShowKey(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+            <Lock className="w-3 h-3 shrink-0" />
+            Stored as Replit Secret: <code className="font-mono bg-secondary px-1 rounded">THREATLENS_API_KEY</code>
+            {apiKeyIsSet && <span className="text-emerald-400 ml-1">● configured</span>}
+          </p>
+        </div>
+
         <div className="flex items-center gap-3 pt-1">
           <button
             type="button"
@@ -1215,7 +1298,7 @@ function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
 
       <div className="flex justify-end pt-2">
         <button
-          onClick={saveAll}
+          onClick={() => saveMutation.mutate()}
           disabled={saveMutation.isPending}
           className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
         >
