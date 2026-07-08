@@ -63,7 +63,7 @@ export async function requireAuthOrApiKey(req: Request, res: Response, next: Nex
             userId: candidate.userId,
             email: "",
             username: "api-key",
-            role: "api",
+            role: "viewer",
           } as JwtPayload;
           req.apiKeyScopes = candidate.scopes ?? [];
           next();

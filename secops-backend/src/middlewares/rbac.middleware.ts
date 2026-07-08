@@ -93,7 +93,7 @@ export function canOrApiKeyScope(permission: Permission) {
       return;
     }
     // API key path: check key scopes directly
-    if (user.role === "api") {
+    if ((req.apiKeyScopes?.length ?? 0) > 0) {
       const scopes: string[] = req.apiKeyScopes ?? [];
       if (scopes.includes(permission)) {
         next();

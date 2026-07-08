@@ -72,3 +72,12 @@ __pycache__/
 
 # Misc
 coverage/
+
+.gitignore
+.vite
+.agents
+.codex
+
+.vite/*
+.agents/*
+.codex/*

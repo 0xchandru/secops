@@ -238,6 +238,17 @@ export async function executeAlertAction(
     });
   }
 
+  const AUDIT_ACTION_MAP = {
+    investigate: "alert_investigated",
+    assign: "alert_assigned",
+    unassign: "alert_unassigned",
+    escalate: "alert_escalated",
+    resolve: "alert_resolved",
+    reopen: "alert_reopened",
+    false_positive: "alert_false_positive",
+    add_note: "alert_note_added",
+  } as const;
+
   // 6. Audit log
   const newState = { status: updatedAlert.status, assignedTo: updatedAlert.assignedTo };
   if (isOverride) {
@@ -245,7 +256,7 @@ export async function executeAlertAction(
       ? await permissionEngine.resolveUserContext(existing.assignedTo)
       : null;
     await auditService.logOverride(req, userCtx, {
-      action: `alert_${action}` as any,
+      action: AUDIT_ACTION_MAP[action] as any,
       entityType: "alert",
       entityId: alertId,
       previousState,
@@ -255,7 +266,7 @@ export async function executeAlertAction(
     });
   } else {
     await auditService.log(req, userCtx, {
-      action: `alert_${action}` as any,
+      action: AUDIT_ACTION_MAP[action] as any,
       entityType: "alert",
       entityId: alertId,
       previousState,
@@ -471,8 +482,13 @@ export async function updateAlertStatus(id: string, status: string, userId: stri
   return alert ?? null;
 }
 
-export async function bulkUpdateAlertStatus(ids: string[], status: string, userId: string, resolutionNotes?: string) {
-  const [{ count }] = await db
+export async function bulkUpdateAlertStatus(
+  ids: string[],
+  status: string,
+  userId: string,
+  resolutionNotes?: string,
+) {
+  const updated = await db
     .update(alertsTable)
     .set({
       status: status as any,
@@ -482,9 +498,9 @@ export async function bulkUpdateAlertStatus(ids: string[], status: string, userI
       resolutionNotes: resolutionNotes ?? null,
     })
     .where(inArray(alertsTable.id, ids))
-    .returning({ count: sql<number>`count(*)` });
+    .returning({ id: alertsTable.id });
 
-  return Number(count ?? ids.length);
+  return updated.length;
 }
 
 export async function assignAlertTo(id: string, assignedTo: string, userId: string) {

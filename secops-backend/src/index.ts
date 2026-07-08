@@ -19,6 +19,10 @@ import { startSyslogReceiver } from "./receivers/syslog-server";
 import { startWorker } from "./workers/pipeline-worker";
 import { loadSecretsIntoEnv } from "./lib/replit-secrets";
 
+import { seedRolesAndPermissions } from "./modules/roles/roles.service";
+
+await seedRolesAndPermissions();
+
 const rawPort = process.env["PORT"];
 
 if (!rawPort) {
