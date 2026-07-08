@@ -1,4 +1,0 @@
-- [SecOps stack](secops-stack.md) — React 19 + Vite 7 + Tailwind, Express 5, Drizzle ORM + PostgreSQL, Redis; auth via Zustand store; TanStack Query for data.
-- [Alert action rules](alert-actions.md) — getAvailableActions is deprecated fallback; actionsFromBackend() is canonical; new/investigating statuses now allow direct resolve/FP without ownership.
-- [Logs date filtering](logs-date-filter.md) — Backend /logs supports startTime/endTime ISO params and from as relative (5m/1h/24h/7d). Custom range encoded as custom|ISO|ISO in timeRange state.
-- [Settings 404 pattern](settings-notes.md) — /api/settings/system returns 401 for unauthed (correct). Requires users:manage permission. system_settings table exists and is exported via schema/index.ts.
