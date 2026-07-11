@@ -1,71 +1,97 @@
 #!/usr/bin/env bash
-# ═══════════════════════════════════════════════════════════════════
+# ╔══════════════════════════════════════════════════════════════════════════╗
 #  SecOps Console — Unified Start Script
-#  Works on Replit (auto-detects) and local Linux/macOS machines
-# ═══════════════════════════════════════════════════════════════════
-set -e
+#  Installs all dependencies, sets up the database, and starts the full stack
+#  Supports: Replit (auto-detected) · Ubuntu/Debian · macOS
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+set -euo pipefail
+
+# ── Colour helpers ────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+ok()   { echo -e "${GREEN}  ✓${RESET}  $*"; }
+info() { echo -e "${CYAN}  →${RESET}  $*"; }
+warn() { echo -e "${YELLOW}  ⚠${RESET}  $*"; }
+err()  { echo -e "${RED}  ✗${RESET}  $*" >&2; }
+hr()   { echo -e "${CYAN}────────────────────────────────────────${RESET}"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$SCRIPT_DIR/secops-backend"
 FRONTEND_DIR="$SCRIPT_DIR/secops-frontend"
-BACKEND_PORT=${BACKEND_PORT:-8080}
-FRONTEND_PORT=${FRONTEND_PORT:-5000}
+BACKEND_PORT="${BACKEND_PORT:-8080}"
+FRONTEND_PORT="${FRONTEND_PORT:-5000}"
 
-# ── Detect Replit environment ──────────────────────────────────────
-IS_REPLIT=${REPL_SLUG:-${REPL_ID:-""}}
+# Detect Replit environment
+IS_REPLIT="${REPL_SLUG:-${REPL_ID:-}}"
 
-# ── Graceful shutdown ──────────────────────────────────────────────
+# ── Graceful shutdown ─────────────────────────────────────────────────────────
 cleanup() {
   echo ""
-  echo "Shutting down SecOps Console..."
-  kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
-  # Only stop Redis if we started it (not on managed platforms)
-  if [ -z "$IS_REPLIT" ] && [ "${REDIS_STARTED:-0}" = "1" ]; then
+  info "Shutting down SecOps Console…"
+  kill "${BACKEND_PID:-}" "${FRONTEND_PID:-}" 2>/dev/null || true
+  if [[ -z "$IS_REPLIT" && "${REDIS_STARTED:-0}" == "1" ]]; then
     redis-cli shutdown nosave 2>/dev/null || true
   fi
   wait 2>/dev/null || true
-  echo "Stopped."
+  ok "Stopped."
 }
 trap cleanup EXIT INT TERM
 
-# ── Kill anything already using our ports ─────────────────────────
-fuser -k "${BACKEND_PORT}/tcp" 2>/dev/null || true
+# ── Kill anything already on our ports ────────────────────────────────────────
+fuser -k "${BACKEND_PORT}/tcp"  2>/dev/null || true
 fuser -k "${FRONTEND_PORT}/tcp" 2>/dev/null || true
 
-echo "═══════════════════════════════════════"
-echo "  SecOps Console"
-echo "═══════════════════════════════════════"
+# ═══════════════════════════════════════════════════════════════════════════════
+echo -e ""
+echo -e "${BOLD}${CYAN}  ███████╗███████╗ ██████╗ ██████╗ ██████╗ ███████╗${RESET}"
+echo -e "${BOLD}${CYAN}  ██╔════╝██╔════╝██╔════╝██╔═══██╗██╔══██╗██╔════╝${RESET}"
+echo -e "${BOLD}${CYAN}  ███████╗█████╗  ██║     ██║   ██║██████╔╝███████╗${RESET}"
+echo -e "${BOLD}${CYAN}  ╚════██║██╔══╝  ██║     ██║   ██║██╔═══╝ ╚════██║${RESET}"
+echo -e "${BOLD}${CYAN}  ███████║███████╗╚██████╗╚██████╔╝██║     ███████║${RESET}"
+echo -e "${BOLD}${CYAN}  ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚══════╝${RESET}"
+echo -e "${BOLD}           SecOps Console  —  mini-SIEM${RESET}"
+echo ""
+hr
 
-# ── Redis ──────────────────────────────────────────────────────────
+# ── Verify Node.js ────────────────────────────────────────────────────────────
+if ! command -v node &>/dev/null; then
+  err "Node.js not found. Install Node.js 22+ from https://nodejs.org"
+  exit 1
+fi
+NODE_VER=$(node -e "process.stdout.write(process.versions.node)")
+ok "Node.js $NODE_VER"
+
+# ── Redis ─────────────────────────────────────────────────────────────────────
 if redis-cli ping &>/dev/null 2>&1; then
-  echo "[ OK ] Redis already running"
+  ok "Redis already running"
 else
-  echo "Starting Redis..."
-  redis-server --daemonize yes --loglevel warning
-  sleep 1
-  REDIS_STARTED=1
-  echo "[ OK ] Redis started"
+  info "Starting Redis…"
+  if redis-server --daemonize yes --loglevel warning 2>/dev/null; then
+    sleep 1
+    REDIS_STARTED=1
+    ok "Redis started"
+  else
+    warn "Could not start Redis. Check your Redis installation."
+    warn "Ubuntu: sudo apt install redis-server  |  macOS: brew install redis"
+  fi
 fi
 
-# ── PostgreSQL check (local only) ─────────────────────────────────
-if [ -z "$IS_REPLIT" ]; then
+# ── PostgreSQL (local-only check) ─────────────────────────────────────────────
+if [[ -z "$IS_REPLIT" ]]; then
   if ! pg_isready -q 2>/dev/null; then
-    echo ""
-    echo "[ERR] PostgreSQL is not running."
+    err "PostgreSQL is not running."
     echo "      Ubuntu/Debian : sudo systemctl start postgresql"
     echo "      macOS Homebrew: brew services start postgresql@15"
-    echo ""
     exit 1
   fi
-  echo "[ OK ] PostgreSQL is running"
+  ok "PostgreSQL running"
 fi
 
-# ── .env setup (local only) ──────────────────────────────────────
-if [ -z "$IS_REPLIT" ]; then
-  if [ ! -f "$BACKEND_DIR/.env" ]; then
-    echo ""
-    echo "Creating $BACKEND_DIR/.env with default values..."
-    cat > "$BACKEND_DIR/.env" << 'ENVEOF'
+# ── .env setup (local only) ───────────────────────────────────────────────────
+if [[ -z "$IS_REPLIT" && ! -f "$BACKEND_DIR/.env" ]]; then
+  info "Creating $BACKEND_DIR/.env with default values…"
+  cat > "$BACKEND_DIR/.env" << 'ENVEOF'
 PORT=8080
 NODE_ENV=development
 DATABASE_URL=postgresql://secops:secops_pass@localhost:5432/secops
@@ -78,63 +104,115 @@ SYSLOG_UDP_PORT=1514
 SYSLOG_TCP_PORT=1514
 LOG_LEVEL=info
 ENVEOF
-    echo "      Edit $BACKEND_DIR/.env to set your DATABASE_URL and secrets."
-    echo ""
-  fi
+  warn "Edit $BACKEND_DIR/.env to set your DATABASE_URL and JWT secrets."
 fi
 
-# ── Backend dependencies ───────────────────────────────────────────
+hr
+echo -e "${BOLD}  Installing dependencies${RESET}"
+hr
+
+# ── Backend dependencies ──────────────────────────────────────────────────────
 cd "$BACKEND_DIR"
-if [ ! -f "node_modules/.bin/esbuild" ]; then
-  echo "Installing backend dependencies..."
-  npm install
+if [[ ! -f "node_modules/.bin/esbuild" ]]; then
+  info "Installing backend dependencies…"
+  npm install --prefer-offline 2>&1 | tail -3
+  ok "Backend dependencies installed"
+else
+  ok "Backend dependencies up to date"
 fi
 
-# ── Apply database schema ─────────────────────────────────────────
-echo "Applying database schema..."
-npm run db:push 2>&1 | grep -v "^\[" | grep -v "^$" || true
+# ── Frontend dependencies ─────────────────────────────────────────────────────
+cd "$FRONTEND_DIR"
+if [[ ! -d "node_modules" ]]; then
+  info "Installing frontend dependencies…"
+  npm install --prefer-offline 2>&1 | tail -3
+  ok "Frontend dependencies installed"
+else
+  ok "Frontend dependencies up to date"
+fi
 
-# ── Build backend ─────────────────────────────────────────────────
-echo "Building backend..."
-node build.mjs
+hr
+echo -e "${BOLD}  Database setup${RESET}"
+hr
 
-# ── Start backend ─────────────────────────────────────────────────
-echo "Starting backend on :${BACKEND_PORT}..."
-if [ -z "$IS_REPLIT" ] && [ -f "$BACKEND_DIR/.env" ]; then
-  PORT=$BACKEND_PORT node --env-file="$BACKEND_DIR/.env" --enable-source-maps ./dist/index.mjs &
+# ── Apply Drizzle schema ──────────────────────────────────────────────────────
+cd "$BACKEND_DIR"
+info "Applying database schema…"
+if npm run db:push 2>&1 | grep -v "^\[" | grep -v "^$" | grep -v "^>" | tail -5; then
+  ok "Database schema applied"
+else
+  warn "Schema push may have had warnings — check above output"
+fi
+
+hr
+echo -e "${BOLD}  Building backend${RESET}"
+hr
+
+# ── Build backend ─────────────────────────────────────────────────────────────
+cd "$BACKEND_DIR"
+info "Building backend with esbuild…"
+if node build.mjs 2>&1 | tail -4; then
+  ok "Backend built successfully"
+else
+  err "Backend build failed. Check output above."
+  exit 1
+fi
+
+hr
+echo -e "${BOLD}  Starting services${RESET}"
+hr
+
+# ── Launch backend ────────────────────────────────────────────────────────────
+cd "$BACKEND_DIR"
+info "Starting backend on :${BACKEND_PORT}…"
+if [[ -z "$IS_REPLIT" && -f ".env" ]]; then
+  PORT=$BACKEND_PORT node --env-file=".env" --enable-source-maps ./dist/index.mjs &
 else
   PORT=$BACKEND_PORT node --enable-source-maps ./dist/index.mjs &
 fi
 BACKEND_PID=$!
 
-# Give backend time to initialise
-sleep 4
+# Wait for backend to be ready (up to 20 s)
+for i in {1..20}; do
+  if curl -s "http://localhost:${BACKEND_PORT}/healthz" &>/dev/null; then
+    ok "Backend ready  →  http://localhost:${BACKEND_PORT}"
+    break
+  fi
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    err "Backend process exited unexpectedly."
+    exit 1
+  fi
+  sleep 1
+done
 
-# ── Frontend dependencies ─────────────────────────────────────────
+# ── Launch frontend ───────────────────────────────────────────────────────────
 cd "$FRONTEND_DIR"
-if [ ! -d "node_modules" ]; then
-  echo "Installing frontend dependencies..."
-  npm install
-fi
-
-# ── Start frontend ────────────────────────────────────────────────
-echo "Starting frontend on :${FRONTEND_PORT}..."
+info "Starting frontend on :${FRONTEND_PORT}…"
 PORT=$FRONTEND_PORT npx vite --host 0.0.0.0 --port "$FRONTEND_PORT" &
 FRONTEND_PID=$!
+sleep 2
+ok "Frontend ready  →  http://localhost:${FRONTEND_PORT}"
 
+# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "═══════════════════════════════════════"
-echo "  SecOps Console is running"
-echo "  Backend:  http://localhost:${BACKEND_PORT}"
-echo "  Frontend: http://localhost:${FRONTEND_PORT}"
+hr
+echo -e "${BOLD}  🚀  SecOps Console is running${RESET}"
+hr
+echo -e "  ${CYAN}Frontend${RESET}   http://localhost:${FRONTEND_PORT}"
+echo -e "  ${CYAN}Backend API${RESET} http://localhost:${BACKEND_PORT}/api"
+echo -e "  ${CYAN}Health${RESET}     http://localhost:${BACKEND_PORT}/healthz"
 echo ""
-echo "  Demo accounts (all seeded automatically):"
-echo "    admin          / Admin@123"
-echo "    senior_analyst / Analyst@123"
-echo "    analyst        / Analyst@123"
-echo "    tier1 (bob)    / Tier1@123"
+echo -e "${BOLD}  Demo accounts${RESET}"
+echo -e "  ${GREEN}admin${RESET}   / Admin@SecOps1!   (Administrator)"
+echo -e "  ${GREEN}morgan${RESET}  / Manager@1234!    (SOC Manager)"
+echo -e "  ${GREEN}elena${RESET}   / Engineer@1234!   (Detection Engineer)"
+echo -e "  ${GREEN}alice${RESET}   / Analyst@1234!    (SOC L2 Analyst)"
+echo -e "  ${GREEN}bob${RESET}     / Analyst@1234!    (SOC L1 Analyst)"
+echo -e "  ${GREEN}viewer${RESET}  / Viewer@1234!     (Read-Only Viewer)"
 echo ""
-echo "  Press Ctrl+C to stop."
-echo "═══════════════════════════════════════"
+hr
+echo -e "  Press ${BOLD}Ctrl+C${RESET} to stop all services."
+hr
+echo ""
 
 wait
