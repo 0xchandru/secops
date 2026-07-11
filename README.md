@@ -178,7 +178,7 @@ bash secops-forwarder/start.sh
 
 ### Prerequisites
 
-> **On Replit** — PostgreSQL and Redis are already provisioned. Just run `bash start.sh`.
+> **Tip:** If PostgreSQL and Redis are already provisioned in your environment, just run `bash start.sh` — the script skips setup steps that are already done.
 
 For local development, install these first:
 
@@ -248,9 +248,9 @@ The backend reads configuration from environment variables (or `secops-backend/.
 | `SYSLOG_UDP_PORT` | No | `1514` | UDP syslog listen port |
 | `SYSLOG_TCP_PORT` | No | `1514` | TCP syslog listen port |
 | `LOG_LEVEL` | No | `info` | Pino log level (`debug`, `info`, `warn`, `error`) |
-| `SMTP_PASSWORD` | No | — | SMTP password for email alerts (Replit Secret) |
-| `SLACK_WEBHOOK_URL` | No | — | Slack incoming webhook URL (Replit Secret) |
-| `THREATLENS_API_KEY` | No | — | ThreatLens enrichment API key (Replit Secret) |
+| `SMTP_PASSWORD` | No | — | SMTP password for email alert delivery |
+| `SLACK_WEBHOOK_URL` | No | — | Slack incoming webhook URL |
+| `THREATLENS_API_KEY` | No | — | ThreatLens enrichment service API key |
 
 ---
 

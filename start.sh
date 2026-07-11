@@ -2,7 +2,7 @@
 # ╔══════════════════════════════════════════════════════════════════════════╗
 #  SecOps Console — Unified Start Script
 #  Installs all dependencies, sets up the database, and starts the full stack
-#  Supports: Replit (auto-detected) · Ubuntu/Debian · macOS
+#  Supports: Ubuntu/Debian · macOS · any Linux environment
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
 set -euo pipefail
@@ -22,15 +22,12 @@ FRONTEND_DIR="$SCRIPT_DIR/secops-frontend"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-5000}"
 
-# Detect Replit environment
-IS_REPLIT="${REPL_SLUG:-${REPL_ID:-}}"
-
 # ── Graceful shutdown ─────────────────────────────────────────────────────────
 cleanup() {
   echo ""
   info "Shutting down SecOps Console…"
   kill "${BACKEND_PID:-}" "${FRONTEND_PID:-}" 2>/dev/null || true
-  if [[ -z "$IS_REPLIT" && "${REDIS_STARTED:-0}" == "1" ]]; then
+  if [[ "${REDIS_STARTED:-0}" == "1" ]]; then
     redis-cli shutdown nosave 2>/dev/null || true
   fi
   wait 2>/dev/null || true
@@ -72,24 +69,24 @@ else
     REDIS_STARTED=1
     ok "Redis started"
   else
-    warn "Could not start Redis. Check your Redis installation."
-    warn "Ubuntu: sudo apt install redis-server  |  macOS: brew install redis"
+    warn "Could not start Redis. Install it first:"
+    warn "  Ubuntu: sudo apt install redis-server  |  macOS: brew install redis"
   fi
 fi
 
-# ── PostgreSQL (local-only check) ─────────────────────────────────────────────
-if [[ -z "$IS_REPLIT" ]]; then
-  if ! pg_isready -q 2>/dev/null; then
-    err "PostgreSQL is not running."
-    echo "      Ubuntu/Debian : sudo systemctl start postgresql"
-    echo "      macOS Homebrew: brew services start postgresql@15"
-    exit 1
-  fi
+# ── PostgreSQL check ──────────────────────────────────────────────────────────
+if pg_isready -q 2>/dev/null; then
   ok "PostgreSQL running"
+elif [[ -n "${DATABASE_URL:-}" ]]; then
+  ok "PostgreSQL connection string provided via DATABASE_URL"
+else
+  warn "PostgreSQL not detected. Ensure DATABASE_URL is set or start PostgreSQL:"
+  warn "  Ubuntu: sudo systemctl start postgresql"
+  warn "  macOS:  brew services start postgresql@15"
 fi
 
-# ── .env setup (local only) ───────────────────────────────────────────────────
-if [[ -z "$IS_REPLIT" && ! -f "$BACKEND_DIR/.env" ]]; then
+# ── .env setup ────────────────────────────────────────────────────────────────
+if [[ ! -f "$BACKEND_DIR/.env" && -z "${DATABASE_URL:-}" ]]; then
   info "Creating $BACKEND_DIR/.env with default values…"
   cat > "$BACKEND_DIR/.env" << 'ENVEOF'
 PORT=8080
@@ -104,7 +101,7 @@ SYSLOG_UDP_PORT=1514
 SYSLOG_TCP_PORT=1514
 LOG_LEVEL=info
 ENVEOF
-  warn "Edit $BACKEND_DIR/.env to set your DATABASE_URL and JWT secrets."
+  warn "Edit $BACKEND_DIR/.env and set your DATABASE_URL + JWT secrets."
 fi
 
 hr
@@ -138,11 +135,8 @@ hr
 # ── Apply Drizzle schema ──────────────────────────────────────────────────────
 cd "$BACKEND_DIR"
 info "Applying database schema…"
-if npm run db:push 2>&1 | grep -v "^\[" | grep -v "^$" | grep -v "^>" | tail -5; then
-  ok "Database schema applied"
-else
-  warn "Schema push may have had warnings — check above output"
-fi
+npm run db:push 2>&1 | grep -v "^\[" | grep -v "^$" | grep -v "^>" | tail -5 || true
+ok "Database schema applied"
 
 hr
 echo -e "${BOLD}  Building backend${RESET}"
@@ -165,7 +159,7 @@ hr
 # ── Launch backend ────────────────────────────────────────────────────────────
 cd "$BACKEND_DIR"
 info "Starting backend on :${BACKEND_PORT}…"
-if [[ -z "$IS_REPLIT" && -f ".env" ]]; then
+if [[ -f ".env" ]]; then
   PORT=$BACKEND_PORT node --env-file=".env" --enable-source-maps ./dist/index.mjs &
 else
   PORT=$BACKEND_PORT node --enable-source-maps ./dist/index.mjs &

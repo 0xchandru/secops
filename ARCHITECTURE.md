@@ -653,4 +653,4 @@ secops-backend/src/modules/
 | **Pre-filter index in detection engine** | Skip rules that cannot possibly match based on field presence; critical throughput at high EPS |
 | **Redis-cached permission sets** | A DB permission query on every request would serialise all API traffic under load |
 | **Sigma-compatible YAML rule format** | Rules readable by industry tooling; pySigma can convert community rules directly |
-| **Persistent secrets via Replit DB** | Sensitive values (SMTP password, Slack webhook, API keys) survive container restarts without plaintext `.env` |
+| **Persistent secret store** | Sensitive values (SMTP password, Slack webhook, API keys) are persisted outside plaintext `.env` and survive container/process restarts |

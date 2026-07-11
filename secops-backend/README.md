@@ -93,7 +93,7 @@ secops-backend/
     │   ├── search/             # SPL parser (AST) + PostgreSQL executor
     │   ├── enrichment.ts       # GeoIP, asset lookup, risk scoring
     │   ├── notification-service.ts  # Email (nodemailer) + Slack webhooks
-    │   ├── replit-secrets.ts   # Persistent secret store (Replit DB)
+    │   ├── secrets-store.ts    # Persistent secret store (key-value DB)
     │   ├── scheduler.ts        # node-cron task definitions
     │   ├── redis.ts            # Redis client + Streams + Pub/Sub helpers
     │   ├── websocket.ts        # WebSocket server + channel management
@@ -150,7 +150,7 @@ SYSLOG_UDP_PORT=1514
 SYSLOG_TCP_PORT=1514
 ```
 
-**Secrets** (set via Replit Secrets or environment — never stored in `.env` plaintext):
+**Secrets** (set via environment variables or a secrets manager — never stored in `.env` plaintext):
 
 | Secret | Description |
 |---|---|

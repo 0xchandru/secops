@@ -18,7 +18,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 BACKEND_PORT="${PORT:-8080}"
-IS_REPLIT="${REPL_SLUG:-${REPL_ID:-}}"
 
 echo ""
 echo -e "${BOLD}${CYAN}  SecOps Console — Backend${RESET}"
@@ -38,19 +37,20 @@ else
   warn "Redis is not running. Start it with: redis-server --daemonize yes"
 fi
 
-# ── PostgreSQL check (local) ─────────────────────────────────────────────────
-if [[ -z "$IS_REPLIT" ]]; then
-  if ! pg_isready -q 2>/dev/null; then
-    err "PostgreSQL is not running."
-    echo "      Ubuntu: sudo systemctl start postgresql"
-    echo "      macOS:  brew services start postgresql@15"
-    exit 1
-  fi
+# ── PostgreSQL check ──────────────────────────────────────────────────────────
+if pg_isready -q 2>/dev/null; then
   ok "PostgreSQL running"
+elif [[ -n "${DATABASE_URL:-}" ]]; then
+  ok "PostgreSQL connection string provided via DATABASE_URL"
+else
+  err "PostgreSQL not detected and DATABASE_URL is not set."
+  echo "      Ubuntu: sudo systemctl start postgresql"
+  echo "      macOS:  brew services start postgresql@15"
+  exit 1
 fi
 
 # ── .env setup ────────────────────────────────────────────────────────────────
-if [[ -z "$IS_REPLIT" && ! -f ".env" ]]; then
+if [[ ! -f ".env" && -z "${DATABASE_URL:-}" ]]; then
   info "Creating .env with default values…"
   cat > .env << 'ENVEOF'
 PORT=8080
@@ -95,7 +95,7 @@ hr
 echo -e "${BOLD}  Starting backend on :${BACKEND_PORT}${RESET}"
 hr
 
-if [[ -z "$IS_REPLIT" && -f ".env" ]]; then
+if [[ -f ".env" ]]; then
   exec node --env-file=".env" --enable-source-maps ./dist/index.mjs
 else
   exec node --enable-source-maps ./dist/index.mjs
