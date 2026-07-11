@@ -5,6 +5,7 @@ import { notifyUser } from "../../lib/notifications";
 import { alertStateMachine, type AlertStatus, type AlertAction } from "../../lib/alert-state-machine";
 import { permissionEngine, type UserContext } from "../../lib/permission-engine";
 import { auditService } from "../../lib/audit";
+import { notifyAlertStatusChanged, notifyAlertAssigned } from "../../lib/notification-service";
 import type { Request } from "express";
 
 let alertCounter = 1000;
@@ -223,6 +224,40 @@ export async function executeAlertAction(
   if (!updatedAlert) {
     return { success: false, error: "Failed to execute action" };
   }
+
+  // Fire-and-forget external notifications (email / Slack) — must not block the response
+  setImmediate(async () => {
+    try {
+      if (action === "escalate" || action === "resolve") {
+        await notifyAlertStatusChanged({
+          id: updatedAlert.id,
+          alertCode: updatedAlert.alertCode ?? null,
+          title: updatedAlert.title,
+          severity: updatedAlert.severity,
+          status: updatedAlert.status,
+          previousStatus: existing.status,
+          actor: userCtx.displayName ?? userCtx.username,
+        });
+      }
+      if (action === "assign" && params.assignTo) {
+        const [assignee] = await db
+          .select({ email: usersTable.email, displayName: usersTable.displayName, username: usersTable.username })
+          .from(usersTable)
+          .where(eq(usersTable.id, params.assignTo))
+          .limit(1);
+        if (assignee?.email) {
+          await notifyAlertAssigned({
+            alertId: updatedAlert.id,
+            alertCode: updatedAlert.alertCode ?? null,
+            title: updatedAlert.title,
+            severity: updatedAlert.severity,
+            assigneeEmail: assignee.email,
+            assigneeName: assignee.displayName || assignee.username || params.assignTo,
+          });
+        }
+      }
+    } catch { /* non-fatal */ }
+  });
 
   // 5. Record state transition (for status-changing actions)
   if (result.toStatus) {

@@ -14,7 +14,7 @@ async function getDbSetting(key: string): Promise<string | null> {
   return row[0]?.value ?? null;
 }
 
-// Email credentials: non-sensitive from DB, password from process.env (Replit Secret: SMTP_PASSWORD)
+// Email credentials: non-sensitive from DB, password from process.env (SMTP_PASSWORD env var)
 export async function getEmailConfig(): Promise<{
   enabled: boolean; host: string; port: number;
   username: string; password: string; from: string;
@@ -30,7 +30,7 @@ export async function getEmailConfig(): Promise<{
   return { enabled: true, host, port, username, password, from };
 }
 
-// Slack: enabled flag from DB, webhook URL from process.env (Replit Secret: SLACK_WEBHOOK_URL)
+// Slack: enabled flag from DB, webhook URL from process.env (SLACK_WEBHOOK_URL env var)
 export async function getSlackConfig(): Promise<{
   enabled: boolean; webhookUrl: string;
 } | null> {
@@ -41,7 +41,7 @@ export async function getSlackConfig(): Promise<{
   return { enabled: true, webhookUrl };
 }
 
-// ThreatLens: URL from DB (with env fallback), API key from process.env (Replit Secret: THREATLENS_API_KEY)
+// ThreatLens: URL from DB (with env fallback), API key from process.env (THREATLENS_API_KEY env var)
 export async function getThreatLensConfig(): Promise<{
   url: string; apiKey: string;
 } | null> {
@@ -128,7 +128,7 @@ export async function notifyAlertCreated(alert: {
   const isHigh = ["critical", "high"].includes(alert.severity.toLowerCase());
   if (!isHigh) return;
 
-  const appUrl = process.env["APP_URL"] ?? `https://${process.env["REPLIT_DEV_DOMAIN"] ?? "localhost:5000"}`;
+  const appUrl = process.env["APP_URL"] ?? "http://localhost:5000";
   const link = `${appUrl}/alerts/${alert.id}`;
   const sevEmoji = alert.severity === "critical" ? "🔴" : "🟠";
   const code = alert.alertCode ?? alert.id.slice(0, 8);
@@ -185,7 +185,7 @@ export async function notifyAlertAssigned(opts: {
   alertId: string; alertCode?: string | null; title: string;
   severity: string; assigneeEmail: string; assigneeName: string;
 }): Promise<void> {
-  const appUrl = process.env["APP_URL"] ?? `https://${process.env["REPLIT_DEV_DOMAIN"] ?? "localhost:5000"}`;
+  const appUrl = process.env["APP_URL"] ?? "http://localhost:5000";
   const link = `${appUrl}/alerts/${opts.alertId}`;
 
   sendEmail({
@@ -214,7 +214,7 @@ export async function notifyAlertStatusChanged(alert: {
   const isResolved = alert.status === "resolved";
   if (!isEscalated && !isResolved) return;
 
-  const appUrl = process.env["APP_URL"] ?? `https://${process.env["REPLIT_DEV_DOMAIN"] ?? "localhost:5000"}`;
+  const appUrl = process.env["APP_URL"] ?? "http://localhost:5000";
   const link = `${appUrl}/alerts/${alert.id}`;
   const emoji = isEscalated ? "🚨" : "✅";
   const label = isEscalated ? "ESCALATED" : "RESOLVED";

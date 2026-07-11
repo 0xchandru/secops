@@ -43,12 +43,12 @@ server.listen(port, async () => {
   logger.info({ port }, "Server listening");
 
   // Load persisted secrets (SMTP_PASSWORD, SLACK_WEBHOOK_URL, THREATLENS_API_KEY)
-  // from Replit DB into process.env before any other initialization uses them.
+  // into process.env before any other initialization uses them.
   try {
     await loadSecretsIntoEnv();
-    logger.info("Secrets loaded from Replit DB");
+    logger.info("Secrets loaded into env");
   } catch (err) {
-    logger.warn({ err }, "Failed to load secrets from Replit DB");
+    logger.warn({ err }, "Failed to load secrets into env");
   }
 
   // Initialize Redis (non-blocking)

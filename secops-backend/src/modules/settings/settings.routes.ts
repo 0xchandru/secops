@@ -4,14 +4,13 @@ import { requireAuth } from "../../middlewares/auth.middleware";
 import { can } from "../../middlewares/rbac.middleware";
 import { db, systemSettingsTable } from "../../db";
 import { eq } from "drizzle-orm";
-import { setSecret, getSecret } from "../../lib/replit-secrets";
+import { setSecret, getSecret, deleteSecret } from "../../lib/replit-secrets";
 import { sendEmail, sendSlack, getEmailConfig, getSlackConfig, getThreatLensConfig } from "../../lib/notification-service";
 import nodemailer from "nodemailer";
 
 const router = Router();
 
-// Sensitive values are stored in Replit DB (persists across restarts) and
-// synced into process.env on load.  The env var names are:
+// Sensitive values are managed as environment variables:
 //   SMTP_PASSWORD, SLACK_WEBHOOK_URL, THREATLENS_API_KEY
 // Non-sensitive config lives in the system_settings PostgreSQL table.
 
@@ -60,8 +59,8 @@ async function readDbSetting(key: string): Promise<string | null> {
 }
 
 // GET /api/settings/system
-// Returns non-sensitive settings from DB and a configured/not-configured
-// indicator for each secret (never the secret value itself).
+// Returns non-sensitive settings from DB and a "configured / not configured"
+// indicator for each secret — never the actual secret value.
 router.get("/settings/system", requireAuth, can("users:manage"), async (_req: Request, res: Response) => {
   const rows = await db.select().from(systemSettingsTable);
   const settings: Record<string, string> = {};
@@ -83,8 +82,8 @@ router.get("/settings/system", requireAuth, can("users:manage"), async (_req: Re
 });
 
 // PATCH /api/settings/system
-// Saves non-sensitive values to PostgreSQL and persists sensitive values to
-// Replit DB (durable across restarts) + process.env.
+// Saves non-sensitive values to PostgreSQL and updates sensitive values in
+// process.env for the current process lifetime.
 router.patch("/settings/system", requireAuth, can("users:manage"), async (req: Request, res: Response) => {
   const updates = req.body as Record<string, string>;
   const userId = req.user!.userId;
@@ -96,9 +95,14 @@ router.patch("/settings/system", requireAuth, can("users:manage"), async (req: R
 
       const envVar = SENSITIVE_ENV_MAP[key];
       if (envVar) {
-        // Skip the unchanged sentinel — don't overwrite with the placeholder
-        if (value === "••••••••" || value === "") return;
-        await setSecret(envVar, value);
+        // Skip the unchanged sentinel — caller sent back the masked placeholder
+        if (value === "••••••••") return;
+        // Empty string = explicit clear request
+        if (value === "") {
+          await deleteSecret(envVar);
+        } else {
+          await setSecret(envVar, value);
+        }
       } else {
         await upsertSetting(key, value, userId);
       }

@@ -22,8 +22,7 @@ async function getBaseUrl(): Promise<string> {
   return (process.env["THREATLENS_API_URL"] ?? "http://localhost:8000").replace(/\/$/, "");
 }
 
-// API key is read exclusively from process.env (populated at startup from
-// Replit DB via loadSecretsIntoEnv, or set as a Replit Secret directly).
+// API key is read from process.env (set via THREATLENS_API_KEY environment variable).
 function getApiKey(): string | undefined {
   return process.env["THREATLENS_API_KEY"] || undefined;
 }
