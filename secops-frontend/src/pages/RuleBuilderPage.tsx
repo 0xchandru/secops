@@ -118,7 +118,6 @@ export default function RuleBuilderPage() {
   const [initialized, setInitialized] = useState(!isEditMode);
   const [stableId] = useState(() => uuidv4());
   const [existingRuleId, setExistingRuleId] = useState<string | null>(null);
-  const [conditionsEdited, setConditionsEdited] = useState(false);
 
   const { data: existingRule, isLoading: loadingRule } = useQuery({
     queryKey: ['rule', ruleId],
@@ -166,10 +165,9 @@ export default function RuleBuilderPage() {
     })).filter(t => t.techniques.length > 0);
   }, [mitreSearch]);
 
-  const addCondition = () => { setConditionsEdited(true); setConditions(prev => [...prev, { id: uuidv4(), field: '', operator: '==', value: '' }]); };
-  const removeCondition = (id: string) => { setConditionsEdited(true); setConditions(prev => prev.filter(c => c.id !== id)); };
+  const addCondition = () => { setConditions(prev => [...prev, { id: uuidv4(), field: '', operator: '==', value: '' }]); };
+  const removeCondition = (id: string) => { setConditions(prev => prev.filter(c => c.id !== id)); };
   const updateCondition = (id: string, key: string, val: string) => {
-    setConditionsEdited(true);
     setConditions(prev => prev.map(c => c.id === id ? { ...c, [key]: val } : c));
   };
 
@@ -179,24 +177,76 @@ export default function RuleBuilderPage() {
   const totalExceptions = exceptions.ips.length + exceptions.cidrs.length + exceptions.hostnames.length + exceptions.usernames.length;
 
   const yamlId = existingRuleId ?? stableId;
-  const safeDesc = (desc || 'No description').replace(/'/g, "''");
-  const generatedYaml = `title: ${name || 'New Rule'}
-id: ${yamlId}
-description: '${safeDesc}'
-status: experimental
-author: Detection Team
-date: ${new Date().toISOString().split('T')[0]}
-logsource:
-  category: ${logSource}
-  product: '*'
-detection:
-  selection:
-${conditions.filter(c => c.field && c.value).map(c => `    ${c.field}${c.operator === 'contains' ? '|contains' : c.operator === 'regex' ? '|re' : ''}: '${c.value.replace(/'/g, "''")}'`).join('\n') || "    event.type: '*'"}
-  condition: selection
-falsepositives:
-  - Legitimate administrative activity
-level: ${severity}
-${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.split(' – ')[0].toLowerCase().replace('.', '_')}`).join('\n')}` : ''}`;
+
+  const generatedYaml = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const safeDesc = (desc || 'No description').replace(/'/g, "''");
+    const safeName = name || 'New Rule';
+
+    const validConditions = conditions.filter(c => c.field.trim() && c.value.trim());
+
+    const selectionLines = validConditions.length === 0
+      ? ["    '*': '*'"]
+      : validConditions.map(c => {
+          const mod =
+            c.operator === 'contains' ? '|contains'   :
+            c.operator === 'regex'    ? '|re'          :
+            c.operator === 'starts'   ? '|startswith'  :
+            c.operator === 'ends'     ? '|endswith'    : '';
+          const safeVal = c.value.replace(/'/g, "''");
+          return `    ${c.field.trim()}${mod}: '${safeVal}'`;
+        });
+
+    const hasIps    = exceptions.ips.length > 0;
+    const hasCidrs  = exceptions.cidrs.length > 0;
+    const hasHosts  = exceptions.hostnames.length > 0;
+    const hasUsers  = exceptions.usernames.length > 0;
+    const hasFilter = hasIps || hasCidrs || hasHosts || hasUsers;
+
+    const filterLines: string[] = [];
+    if (hasFilter) {
+      filterLines.push('filter:');
+      if (hasIps || hasCidrs) {
+        filterLines.push('  sourceIp|cidr:');
+        [...exceptions.ips, ...exceptions.cidrs].forEach(v => filterLines.push(`    - '${v}'`));
+      }
+      if (hasHosts) {
+        filterLines.push('  hostname:');
+        exceptions.hostnames.forEach(v => filterLines.push(`    - '${v}'`));
+      }
+      if (hasUsers) {
+        filterLines.push('  username:');
+        exceptions.usernames.forEach(v => filterLines.push(`    - '${v}'`));
+      }
+    }
+
+    const mitreTags = selectedMitre.map(m => {
+      const id = (m.includes(' – ') ? m.split(' – ')[0] : m).toLowerCase().replace('.', '_');
+      return `  - attack.${id}`;
+    });
+
+    const lines = [
+      `title: ${safeName}`,
+      `id: ${yamlId}`,
+      `status: experimental`,
+      `description: '${safeDesc}'`,
+      `author: Detection Team`,
+      `date: ${today}`,
+      `logsource:`,
+      `  category: ${logSource}`,
+      `  product: '*'`,
+      `detection:`,
+      `  selection:`,
+      ...selectionLines,
+      `  condition: selection${hasFilter ? ' and not filter' : ''}`,
+      ...filterLines,
+      `falsepositives:`,
+      `  - Legitimate administrative activity`,
+      `level: ${severity}`,
+      ...(mitreTags.length > 0 ? ['tags:', ...mitreTags] : []),
+    ];
+    return lines.join('\n');
+  }, [name, desc, severity, logSource, conditions, selectedMitre, exceptions, yamlId]);
 
   const buildPayload = () => ({
     name,
@@ -206,7 +256,14 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
     yamlContent: generatedYaml,
     logSource,
     mitreIds: selectedMitre.map(m => m.includes(' – ') ? m.split(' – ')[0] : m),
-    mitreTactic: selectedMitre.length > 0 ? 'execution' : undefined,
+    mitreTactic: selectedMitre.length > 0
+    ? (() => {
+        const first = selectedMitre[0];
+        const id = first.includes(' – ') ? first.split(' – ')[0] : first;
+        const found = ALL_TECHNIQUES.find(t => t.id === id);
+        return found?.tacticName ?? undefined;
+      })()
+    : undefined,
     tags: [],
     exceptions: totalExceptions > 0 ? exceptions : null,
   });
@@ -445,8 +502,9 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
                     >
                       <option value="==">Equals</option>
                       <option value="contains">Contains</option>
-                      <option value="regex">Regex</option>
                       <option value="starts">Starts With</option>
+                      <option value="ends">Ends With</option>
+                      <option value="regex">Regex</option>
                     </select>
                     <input
                       type="text"
@@ -589,29 +647,20 @@ ${selectedMitre.length > 0 ? `tags:\n${selectedMitre.map(m => `  - attack.${m.sp
             </div>
           </div>
 
-          {/* YAML Preview */}
-          <div className="bg-[#050810] border border-border rounded-xl shadow-lg flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-border bg-card/50 flex justify-between items-center gap-2">
+          {/* YAML Preview — always live from form state */}
+          <div className="bg-[#050810] border border-border rounded-xl shadow-lg flex flex-col lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-140px)]">
+            <div className="p-4 border-b border-border bg-card/50 flex justify-between items-center gap-2 shrink-0">
               <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
                 <Code className="w-4 h-4 text-primary" />
-                {isEditMode && !conditionsEdited ? 'Saved Rule YAML' : 'Live Sigma YAML Preview'}
+                Live Sigma YAML
               </h3>
-              <div className="flex items-center gap-2">
-                {isEditMode && !conditionsEdited && (existingRule?.rule?.yamlContent ?? existingRule?.yamlContent) && (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
-                    Edit conditions to regenerate
-                  </span>
-                )}
-                <span className="text-xs text-muted-foreground font-mono">
-                  {(isEditMode && !conditionsEdited ? (existingRule?.rule?.yamlContent ?? existingRule?.yamlContent ?? generatedYaml) : generatedYaml).split('\n').length} lines
-                </span>
-              </div>
+              <span className="text-xs text-muted-foreground font-mono">
+                {generatedYaml.split('\n').length} lines
+              </span>
             </div>
-            <div className="p-5 flex-1 overflow-auto">
+            <div className="p-5 overflow-auto flex-1">
               <pre className="text-sm font-mono text-green-400 leading-relaxed whitespace-pre-wrap">
-                {isEditMode && !conditionsEdited
-                  ? (existingRule?.rule?.yamlContent ?? existingRule?.yamlContent ?? generatedYaml)
-                  : generatedYaml}
+                {generatedYaml}
               </pre>
             </div>
           </div>

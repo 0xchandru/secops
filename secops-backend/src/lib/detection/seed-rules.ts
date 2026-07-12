@@ -13,874 +13,492 @@ interface SeedRule {
   yamlContent: string;
 }
 
-const DEFAULT_RULES: SeedRule[] = [
-  // ── Rule 1: Brute Force Login Attempt ──────────────────────────
+const SEED_RULES: SeedRule[] = [
+  // ── 1: Brute Force Authentication ─────────────────────────────
   {
-    name: "Brute Force Login Attempt",
-    description: "Detects multiple failed login attempts from the same source IP within a short time window, indicating a possible brute-force attack.",
+    name: "Brute Force Authentication",
+    description: "Detects five or more failed authentication attempts from the same source IP within a five-minute window, consistent with automated credential-stuffing or password-spraying attacks.",
     severity: "high",
-    logSource: "windows_eventlog",
+    logSource: "auth",
     mitreIds: ["T1110"],
     mitreTactic: "Credential Access",
-    tags: ["authentication", "brute-force"],
-    yamlContent: `name: Brute Force Login Attempt
-description: Multiple failed logins from same source IP
+    tags: ["authentication", "brute-force", "__seeded"],
+    yamlContent: `name: Brute Force Authentication
+description: Five or more failed logins from the same source IP within 5 minutes
 severity: high
 type: threshold
 match:
-  category: "authentication"
-  action: "login_failure"
+  category: authentication
+  action: login_failure
 threshold:
   field: srcIp
   count: 5
-  timeframe: "5m"
+  timeframe: 5m
+filter:
+  srcIp|cidr:
+    - 127.0.0.0/8
 mitre:
   tactic: Credential Access
   technique_id: T1110
   technique_name: Brute Force
 alert:
-  title_template: "Brute Force: {count} failed logins from {srcIp}"
-  context_fields: [srcIp, userName, sourceHost]
+  title_template: "Brute force: {count} failed logins from {srcIp}"
+  context_fields: [srcIp, userName, sourceHost, category]
 tags: [authentication, brute-force]
 max_alerts_per_hour: 10
-dedup_window: "10m"
+dedup_window: 10m
 `,
   },
 
-  // ── Rule 2: Suspicious PowerShell Execution ────────────────────
+  // ── 2: Suspicious PowerShell Execution ────────────────────────
   {
     name: "Suspicious PowerShell Execution",
-    description: "Detects PowerShell commands containing obfuscation or download techniques commonly used by attackers.",
+    description: "Detects PowerShell invocations that use obfuscation, encoded commands, or web download cradles — techniques that are strongly associated with initial access and post-exploitation payloads.",
     severity: "high",
-    logSource: "windows_eventlog",
+    logSource: "windows",
     mitreIds: ["T1059.001"],
     mitreTactic: "Execution",
-    tags: ["powershell", "execution"],
+    tags: ["powershell", "execution", "lolbin", "__seeded"],
     yamlContent: `name: Suspicious PowerShell Execution
-description: PowerShell with suspicious download/obfuscation patterns
+description: PowerShell invocation with download, obfuscation, or encoded-command patterns
 severity: high
 type: simple
 match:
+  category: process
+  action: process_create
+  processName|contains|any:
+    - powershell.exe
+    - pwsh.exe
   processCommandLine|contains|any:
-    - "DownloadString"
-    - "IEX"
-    - "-enc"
-    - "-EncodedCommand"
-    - "hidden"
-    - "Invoke-WebRequest"
-    - "FromBase64String"
-    - "Invoke-Expression"
-    - "Net.WebClient"
-    - "Bypass"
+    - -EncodedCommand
+    - -enc
+    - DownloadString
+    - DownloadFile
+    - IEX
+    - Invoke-Expression
+    - Invoke-WebRequest
+    - Net.WebClient
+    - FromBase64String
+    - -ExecutionPolicy Bypass
+    - -NoProfile -NonInteractive
+    - -WindowStyle Hidden
+filter:
+  processCommandLine|contains|any:
+    - MicrosoftEdgeUpdate
+    - Windows\\System32\\WindowsPowerShell
+    - -NonInteractive -NoProfile -Command "exit"
 mitre:
   tactic: Execution
   technique_id: T1059.001
   technique_name: "Command and Scripting Interpreter: PowerShell"
 alert:
   title_template: "Suspicious PowerShell on {sourceHost} by {userName}"
-  context_fields: [processCommandLine, userName, sourceHost, processName]
-tags: [powershell, execution]
+  context_fields: [processCommandLine, processName, parentProcessName, userName, sourceHost]
+tags: [powershell, execution, lolbin]
+dedup_window: 5m
 `,
   },
 
-  // ── Rule 3: PsExec-style Lateral Movement ─────────────────────
-  {
-    name: "PsExec-style Lateral Movement",
-    description: "Detects service installation events matching PsExec, PAExec, or RemCom tools commonly used for lateral movement.",
-    severity: "critical",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1021.002"],
-    mitreTactic: "Lateral Movement",
-    tags: ["lateral-movement", "psexec"],
-    yamlContent: `name: PsExec-style Lateral Movement
-description: Service install matching PsExec/PAExec/RemCom lateral movement tools
-severity: critical
-type: simple
-match:
-  action: "service_install"
-  rawLog|contains|any:
-    - "PSEXESVC"
-    - "PSEXE"
-    - "PAExec"
-    - "RemCom"
-    - "csexec"
-mitre:
-  tactic: Lateral Movement
-  technique_id: T1021.002
-  technique_name: "Remote Services: SMB/Windows Admin Shares"
-alert:
-  title_template: "PsExec lateral movement detected on {sourceHost}"
-  context_fields: [sourceHost, userName, message]
-tags: [lateral-movement, psexec]
-`,
-  },
-
-  // ── Rule 4: SSH Brute Force ────────────────────────────────────
-  {
-    name: "SSH Brute Force",
-    description: "Detects multiple SSH authentication failures from the same source IP, indicating a brute-force SSH attack.",
-    severity: "medium",
-    logSource: "syslog",
-    mitreIds: ["T1110"],
-    mitreTactic: "Credential Access",
-    tags: ["ssh", "brute-force"],
-    yamlContent: `name: SSH Brute Force
-description: Multiple SSH auth failures from same source
-severity: medium
-type: threshold
-match:
-  category: "authentication"
-  action: "login_failure"
-  processName: "sshd"
-threshold:
-  field: srcIp
-  count: 5
-  timeframe: "5m"
-mitre:
-  tactic: Credential Access
-  technique_id: T1110
-  technique_name: Brute Force
-alert:
-  title_template: "SSH Brute Force: {count} failures from {srcIp}"
-  context_fields: [srcIp, userName, sourceHost]
-tags: [ssh, brute-force]
-max_alerts_per_hour: 10
-dedup_window: "10m"
-`,
-  },
-
-  // ── Rule 5: Firewall Connection Blocked – Repeated ─────────────
-  {
-    name: "Firewall Connection Blocked – Repeated",
-    description: "Detects repeated blocked connections from the same source IP, indicating port scanning or reconnaissance.",
-    severity: "medium",
-    logSource: "firewall",
-    mitreIds: ["T1046"],
-    mitreTactic: "Discovery",
-    tags: ["firewall", "port-scan"],
-    yamlContent: `name: "Firewall Connection Blocked \u2013 Repeated"
-description: Repeated blocked connections from same source IP
-severity: medium
-type: threshold
-match:
-  category: "firewall"
-  action: "connection_blocked"
-threshold:
-  field: srcIp
-  count: 5
-  timeframe: "5m"
-mitre:
-  tactic: Discovery
-  technique_id: T1046
-  technique_name: Network Service Discovery
-alert:
-  title_template: "Port Scan: {count} blocked connections from {srcIp}"
-  context_fields: [srcIp, dstIp, dstPort, protocol, sourceHost]
-tags: [firewall, port-scan]
-max_alerts_per_hour: 10
-dedup_window: "10m"
-`,
-  },
-
-  // ── Rule 6: DNS Query to Known C2 Domain ───────────────────────
-  {
-    name: "DNS Query to Known C2 Domain",
-    description: "Detects DNS queries to domains known to be associated with command and control infrastructure.",
-    severity: "critical",
-    logSource: "syslog",
-    mitreIds: ["T1071.004"],
-    mitreTactic: "Command and Control",
-    tags: ["dns", "c2", "ioc"],
-    yamlContent: `name: DNS Query to Known C2 Domain
-description: DNS query to known malicious C2 domain
-severity: critical
-type: simple
-match:
-  category: "dns"
-  dnsQuery|contains|any:
-    - "evil-c2-server.xyz"
-    - "cobalt-beacon.malware.xyz"
-    - "cobaltstrikeC2.darknet.org"
-    - "cobaltstrike"
-    - "malware.xyz"
-    - "darknet.org"
-mitre:
-  tactic: Command and Control
-  technique_id: T1071.004
-  technique_name: "Application Layer Protocol: DNS"
-alert:
-  title_template: "C2 DNS query: {dnsQuery} from {sourceHost}"
-  context_fields: [dnsQuery, sourceHost, srcIp, userName, processName]
-tags: [dns, c2, ioc]
-`,
-  },
-
-  // ── Rule 7: RDP Logon from External IP ─────────────────────────
-  {
-    name: "RDP Logon from External IP",
-    description: "Detects successful RDP (RemoteInteractive) logins from non-RFC1918 IP addresses.",
-    severity: "high",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1021.001"],
-    mitreTactic: "Lateral Movement",
-    tags: ["rdp", "external-access"],
-    yamlContent: `name: RDP Logon from External IP
-description: Successful RDP login from non-private IP address
-severity: high
-type: simple
-match:
-  category: "authentication"
-  action: "login_success"
-  logonType: 10
-  srcIp|not|cidr:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-    - "127.0.0.0/8"
-mitre:
-  tactic: Lateral Movement
-  technique_id: T1021.001
-  technique_name: "Remote Services: Remote Desktop Protocol"
-alert:
-  title_template: "External RDP login: {userName} from {srcIp} to {sourceHost}"
-  context_fields: [srcIp, userName, sourceHost, logonType]
-tags: [rdp, external-access]
-`,
-  },
-
-  // ── Rule 8: New User Account Created ───────────────────────────
-  {
-    name: "New User Account Created",
-    description: "Detects creation of new user accounts which may indicate persistence by an attacker.",
-    severity: "medium",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1136.001"],
-    mitreTactic: "Persistence",
-    tags: ["iam", "user-creation"],
-    yamlContent: `name: New User Account Created
-description: New user account created
-severity: medium
-type: simple
-match:
-  category: "iam"
-  action: "user_created"
-mitre:
-  tactic: Persistence
-  technique_id: T1136.001
-  technique_name: "Create Account: Local Account"
-alert:
-  title_template: "New user created: {targetUserName} on {sourceHost}"
-  context_fields: [targetUserName, userName, sourceHost, userDomain]
-tags: [iam, user-creation]
-`,
-  },
-
-  // ── Rule 9: Suspicious HTTP POST to External IP ────────────────
-  {
-    name: "Suspicious HTTP POST to External IP",
-    description: "Detects large HTTP POST requests to external (non-RFC1918) IP addresses, indicating possible data exfiltration.",
-    severity: "high",
-    logSource: "cef",
-    mitreIds: ["T1041"],
-    mitreTactic: "Exfiltration",
-    tags: ["exfiltration", "http"],
-    yamlContent: `name: Suspicious HTTP POST to External IP
-description: Large HTTP POST to non-private external IP
-severity: high
-type: simple
-match:
-  httpMethod: "POST"
-  dstIp|not|cidr:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-    - "127.0.0.0/8"
-  bytesOut|gt: 1000000
-mitre:
-  tactic: Exfiltration
-  technique_id: T1041
-  technique_name: Exfiltration Over C2 Channel
-alert:
-  title_template: "Data exfiltration: {bytesOut} bytes POST to {dstIp} by {userName}"
-  context_fields: [srcIp, dstIp, httpUrl, bytesOut, userName, sourceHost]
-tags: [exfiltration, http]
-`,
-  },
-
-  // ── Rule 10: Windows Registry Run Key Modification ─────────────
-  {
-    name: "Windows Registry Run Key Modification",
-    description: "Detects modifications to Windows Run/RunOnce registry keys used for persistence.",
-    severity: "high",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1547.001"],
-    mitreTactic: "Persistence",
-    tags: ["registry", "persistence"],
-    yamlContent: `name: Windows Registry Run Key Modification
-description: Modification of Run/RunOnce registry keys for persistence
-severity: high
-type: simple
-match:
-  category: "registry"
-  action: "registry_modify"
-  registryKey|contains|any:
-    - "CurrentVersion\\\\Run"
-    - "CurrentVersion\\\\RunOnce"
-mitre:
-  tactic: Persistence
-  technique_id: T1547.001
-  technique_name: "Boot or Logon Autostart Execution: Registry Run Keys"
-alert:
-  title_template: "Registry Run key modified on {sourceHost} by {userName}"
-  context_fields: [registryKey, registryValue, userName, sourceHost, processName]
-tags: [registry, persistence]
-`,
-  },
-
-  // ── Rule 11: Kerberoasting – SPN Request Spike ─────────────────
-  {
-    name: "Kerberoasting – SPN Request Spike",
-    description: "Detects a spike in Kerberos service ticket requests from a single user, indicating potential Kerberoasting attack.",
-    severity: "high",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1558.003"],
-    mitreTactic: "Credential Access",
-    tags: ["kerberos", "kerberoasting"],
-    yamlContent: `name: "Kerberoasting \u2013 SPN Request Spike"
-description: Spike in Kerberos service ticket requests from single user
-severity: high
-type: threshold
-match:
-  category: "authentication"
-  action: "kerberos_service_ticket"
-threshold:
-  field: userName
-  count: 5
-  timeframe: "5m"
-mitre:
-  tactic: Credential Access
-  technique_id: T1558.003
-  technique_name: "Steal or Forge Kerberos Tickets: Kerberoasting"
-alert:
-  title_template: "Kerberoasting: {count} SPN requests by {userName}"
-  context_fields: [userName, srcIp, sourceHost]
-tags: [kerberos, kerberoasting]
-max_alerts_per_hour: 5
-dedup_window: "15m"
-`,
-  },
-
-  // ── Rule 12: CloudTrail – Root Account Usage ───────────────────
-  {
-    name: "CloudTrail – Root Account Usage",
-    description: "Detects any API activity performed by the AWS root account, which should rarely be used in production.",
-    severity: "critical",
-    logSource: "cloudtrail",
-    mitreIds: ["T1078.004"],
-    mitreTactic: "Privilege Escalation",
-    tags: ["aws", "root-account", "cloudtrail"],
-    yamlContent: `name: "CloudTrail \u2013 Root Account Usage"
-description: AWS root account API activity detected
-severity: critical
-type: simple
-match:
-  sourceType: "cloudtrail"
-  tags|contains: "root-user"
-mitre:
-  tactic: Privilege Escalation
-  technique_id: T1078.004
-  technique_name: "Valid Accounts: Cloud Accounts"
-alert:
-  title_template: "AWS Root account activity: {action} from {srcIp}"
-  context_fields: [action, srcIp, userName, sourceHost, httpUserAgent]
-tags: [aws, root-account, cloudtrail]
-`,
-  },
-
-  // ── Rule 13: Credential Dumping Tool Detected ──────────────────
-  {
-    name: "Credential Dumping Tool Detected",
-    description: "Detects execution of known credential dumping tools like Mimikatz, ProcDump targeting LSASS, or LaZagne.",
-    severity: "critical",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1003"],
-    mitreTactic: "Credential Access",
-    tags: ["credential-dumping", "mimikatz"],
-    yamlContent: `name: Credential Dumping Tool Detected
-description: Execution of known credential dumping tools
-severity: critical
-type: simple
-match:
-  category: "process"
-  action: "process_create"
-  processCommandLine|contains|any:
-    - "mimikatz"
-    - "sekurlsa"
-    - "lsass"
-    - "procdump"
-    - "lazagne"
-    - "comsvcs.dll"
-    - "MiniDump"
-    - "logonpasswords"
-mitre:
-  tactic: Credential Access
-  technique_id: T1003
-  technique_name: OS Credential Dumping
-alert:
-  title_template: "Credential dumping on {sourceHost}: {processName}"
-  context_fields: [processName, processCommandLine, userName, sourceHost, parentProcessName]
-tags: [credential-dumping, mimikatz]
-`,
-  },
-
-  // ── Rule 14: Login After Account Creation (Sequence) ───────────
-  {
-    name: "Login After Account Creation",
-    description: "Detects when a newly created user account logs in shortly after creation, which may indicate attacker persistence.",
-    severity: "high",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1136.001"],
-    mitreTactic: "Persistence",
-    tags: ["sequence", "persistence", "iam"],
-    yamlContent: `name: Login After Account Creation
-description: Newly created account logs in shortly after creation
-severity: high
-type: sequence
-sequence:
-  steps:
-    - match:
-        category: "iam"
-        action: "user_created"
-    - match:
-        category: "authentication"
-        action: "login_success"
-  timeframe: "30m"
-  by_field: userName
-mitre:
-  tactic: Persistence
-  technique_id: T1136.001
-  technique_name: "Create Account: Local Account"
-alert:
-  title_template: "New account {userName} logged in shortly after creation on {sourceHost}"
-  context_fields: [userName, sourceHost, srcIp, targetUserName]
-tags: [sequence, persistence, iam]
-`,
-  },
-
-  // ── Rule 15: Excessive DNS Queries – Possible Tunneling ────────
-  {
-    name: "Excessive DNS Queries – Possible Tunneling",
-    description: "Detects an excessive number of DNS queries from a single host, which may indicate DNS tunneling for data exfiltration.",
-    severity: "high",
-    logSource: "syslog",
-    mitreIds: ["T1071.004"],
-    mitreTactic: "Command and Control",
-    tags: ["dns", "tunneling", "exfiltration"],
-    yamlContent: `name: "Excessive DNS Queries \u2013 Possible Tunneling"
-description: Excessive DNS queries from a single host
-severity: high
-type: threshold
-match:
-  category: "dns"
-  action: "dns_query"
-threshold:
-  field: sourceHost
-  count: 10
-  timeframe: "5m"
-mitre:
-  tactic: Command and Control
-  technique_id: T1071.004
-  technique_name: "Application Layer Protocol: DNS"
-alert:
-  title_template: "DNS tunneling suspect: {count} queries from {sourceHost}"
-  context_fields: [sourceHost, dnsQuery, srcIp]
-tags: [dns, tunneling, exfiltration]
-max_alerts_per_hour: 5
-dedup_window: "10m"
-`,
-  },
-
-  // ── Rule 16: Pass-the-Hash Detection ──────────────────────────
-  {
-    name: "Pass-the-Hash Attack Detected",
-    description: "Detects NTLM authentication with anomalous logon type 3 (Network) from a workstation, a known pass-the-hash indicator.",
-    severity: "critical",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1550.002"],
-    mitreTactic: "Lateral Movement",
-    tags: ["lateral-movement", "pass-the-hash", "ntlm"],
-    yamlContent: `name: Pass-the-Hash Attack Detected
-description: NTLM network logon with NTHash from non-DC host
-severity: critical
-type: simple
-match:
-  category: "authentication"
-  action: "login_success"
-  logonType: 3
-  processName: "NtLmSsp"
-  srcIp|not|cidr:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-    - "127.0.0.0/8"
-mitre:
-  tactic: Lateral Movement
-  technique_id: T1550.002
-  technique_name: "Use Alternate Authentication Material: Pass the Hash"
-alert:
-  title_template: "Pass-the-Hash: {userName} from {srcIp} to {sourceHost}"
-  context_fields: [userName, srcIp, sourceHost, logonType, processName]
-tags: [lateral-movement, pass-the-hash, ntlm]
-dedup_window: "30m"
-`,
-  },
-
-  // ── Rule 17: Scheduled Task Created for Persistence ────────────
-  {
-    name: "Scheduled Task Created for Persistence",
-    description: "Detects creation of scheduled tasks, a common persistence mechanism used by malware and attackers.",
-    severity: "high",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1053.005"],
-    mitreTactic: "Persistence",
-    tags: ["persistence", "scheduled-task"],
-    yamlContent: `name: Scheduled Task Created for Persistence
-description: Scheduled task creation detected via schtasks or Task Scheduler API
-severity: high
-type: simple
-match:
-  category: "process"
-  action: "process_create"
-  processName|contains|any:
-    - "schtasks.exe"
-    - "taskschd.msc"
-  processCommandLine|contains|any:
-    - "/create"
-    - "/sc"
-    - "/tr"
-filter:
-  processCommandLine|contains:
-    - "Microsoft\\\\Windows\\\\UpdateOrchestrator"
-mitre:
-  tactic: Persistence
-  technique_id: T1053.005
-  technique_name: "Scheduled Task/Job: Scheduled Task"
-alert:
-  title_template: "Scheduled task created on {sourceHost} by {userName}"
-  context_fields: [processCommandLine, userName, sourceHost, processName, parentProcessName]
-tags: [persistence, scheduled-task]
-`,
-  },
-
-  // ── Rule 18: Large Outbound DNS Response – Data Exfil ──────────
-  {
-    name: "Large Outbound Data Transfer – Potential Exfiltration",
-    description: "Detects unusually large outbound network transfers that may indicate data exfiltration activity.",
-    severity: "high",
-    logSource: "firewall",
-    mitreIds: ["T1048"],
-    mitreTactic: "Exfiltration",
-    tags: ["exfiltration", "network", "data-transfer"],
-    yamlContent: `name: Large Outbound Data Transfer
-description: Single session outbound transfer exceeding 500MB
-severity: high
-type: simple
-match:
-  category: "network"
-  direction: "outbound"
-  bytesOut|gt: 524288000
-  dstIp|not|cidr:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-mitre:
-  tactic: Exfiltration
-  technique_id: T1048
-  technique_name: "Exfiltration Over Alternative Protocol"
-alert:
-  title_template: "Large outbound transfer: {bytesOut} bytes to {dstIp} from {sourceHost}"
-  context_fields: [srcIp, dstIp, dstPort, bytesOut, protocol, sourceHost]
-tags: [exfiltration, network, data-transfer]
-max_alerts_per_hour: 5
-dedup_window: "1h"
-`,
-  },
-
-  // ── Rule 19: Privilege Escalation via Token Impersonation ───────
-  {
-    name: "Token Impersonation / Privilege Escalation",
-    description: "Detects token impersonation techniques used for privilege escalation, such as those leveraged by Juicy Potato, Rogue Potato, or similar tools.",
-    severity: "critical",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1134"],
-    mitreTactic: "Privilege Escalation",
-    tags: ["privilege-escalation", "token-impersonation"],
-    yamlContent: `name: Token Impersonation Privilege Escalation
-description: Token impersonation technique detected (JuicyPotato, RoguePotato, etc.)
-severity: critical
-type: simple
-match:
-  category: "process"
-  action: "process_create"
-  processCommandLine|contains|any:
-    - "JuicyPotato"
-    - "RoguePotato"
-    - "PrintSpoofer"
-    - "GodPotato"
-    - "SweetPotato"
-    - "SeImpersonatePrivilege"
-mitre:
-  tactic: Privilege Escalation
-  technique_id: T1134
-  technique_name: "Access Token Manipulation"
-alert:
-  title_template: "Token impersonation attempt on {sourceHost} by {userName}"
-  context_fields: [processCommandLine, userName, sourceHost, processName, parentProcessName]
-tags: [privilege-escalation, token-impersonation]
-`,
-  },
-
-  // ── Rule 20: Suspicious Process Spawned by Office App ──────────
-  {
-    name: "Office Application Spawning Shell",
-    description: "Detects when Microsoft Office applications spawn command interpreters or scripting engines — a common initial access technique via malicious macros.",
-    severity: "critical",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1566.001"],
-    mitreTactic: "Initial Access",
-    tags: ["phishing", "macro", "office", "initial-access"],
-    yamlContent: `name: Office Application Spawning Shell
-description: Office application (Word/Excel/PowerPoint) spawning cmd/PowerShell
-severity: critical
-type: simple
-match:
-  category: "process"
-  action: "process_create"
-  parentProcessName|contains|any:
-    - "WINWORD.EXE"
-    - "EXCEL.EXE"
-    - "POWERPNT.EXE"
-    - "OUTLOOK.EXE"
-    - "winword"
-    - "excel"
-    - "powerpnt"
-    - "outlook"
-  processName|contains|any:
-    - "cmd.exe"
-    - "powershell.exe"
-    - "wscript.exe"
-    - "cscript.exe"
-    - "mshta.exe"
-    - "regsvr32.exe"
-    - "rundll32.exe"
-mitre:
-  tactic: Initial Access
-  technique_id: T1566.001
-  technique_name: "Phishing: Spearphishing Attachment"
-alert:
-  title_template: "Office macro shell: {parentProcessName} spawned {processName} on {sourceHost}"
-  context_fields: [processName, parentProcessName, processCommandLine, userName, sourceHost]
-tags: [phishing, macro, office, initial-access]
-`,
-  },
-
-  // ── Rule 21: AWS IAM Policy Change ─────────────────────────────
-  {
-    name: "AWS IAM Policy Change",
-    description: "Detects modifications to IAM policies, roles, or users in AWS CloudTrail, which could indicate privilege escalation or persistent access establishment.",
-    severity: "high",
-    logSource: "cloudtrail",
-    mitreIds: ["T1098"],
-    mitreTactic: "Persistence",
-    tags: ["aws", "iam", "cloudtrail", "cloud"],
-    yamlContent: `name: AWS IAM Policy Change
-description: IAM policy/role/user modification detected in CloudTrail
-severity: high
-type: simple
-match:
-  sourceType: "cloudtrail"
-  action|contains|any:
-    - "PutUserPolicy"
-    - "AttachUserPolicy"
-    - "AttachRolePolicy"
-    - "CreatePolicy"
-    - "CreateUser"
-    - "AddUserToGroup"
-    - "UpdateLoginProfile"
-    - "CreateAccessKey"
-mitre:
-  tactic: Persistence
-  technique_id: T1098
-  technique_name: "Account Manipulation"
-alert:
-  title_template: "AWS IAM change: {action} by {userName} from {srcIp}"
-  context_fields: [action, userName, srcIp, sourceHost, httpUserAgent]
-tags: [aws, iam, cloudtrail, cloud]
-dedup_window: "5m"
-`,
-  },
-
-  // ── Rule 22: LSASS Memory Access (Credential Dumping) ──────────
+  // ── 3: LSASS Memory Access ─────────────────────────────────────
   {
     name: "LSASS Memory Access",
-    description: "Detects attempts to access LSASS memory, a primary method for extracting credentials from Windows systems.",
+    description: "Detects processes opening a handle to lsass.exe for memory read access. This is the primary method used by credential-dumping tools such as Mimikatz, ProcDump, and comsvcs.dll.",
     severity: "critical",
-    logSource: "windows_eventlog",
+    logSource: "windows",
     mitreIds: ["T1003.001"],
     mitreTactic: "Credential Access",
-    tags: ["credential-dumping", "lsass"],
+    tags: ["credential-dumping", "lsass", "mimikatz", "__seeded"],
     yamlContent: `name: LSASS Memory Access
-description: Process opened a handle to LSASS for memory reading
+description: Process opened a handle to lsass.exe for memory reading — credential dump indicator
 severity: critical
 type: simple
 match:
-  category: "process"
-  action: "process_access"
-  processName: "lsass.exe"
+  category: process
+  action: process_access
+  targetProcessName: lsass.exe
+  grantedAccess|contains|any:
+    - "0x1010"
+    - "0x1410"
+    - "0x147a"
+    - "0x1fffff"
+    - "0x1f3fff"
 filter:
-  processCommandLine|contains|any:
-    - "\\\\Windows\\\\System32\\\\antimalware"
-    - "MsMpEng.exe"
-    - "svchost.exe"
+  processName|contains|any:
+    - MsMpEng.exe
+    - svchost.exe
+    - taskmgr.exe
+    - csrss.exe
+    - wininit.exe
+    - lsm.exe
 mitre:
   tactic: Credential Access
   technique_id: T1003.001
   technique_name: "OS Credential Dumping: LSASS Memory"
 alert:
   title_template: "LSASS memory access by {processName} on {sourceHost}"
-  context_fields: [processName, processCommandLine, userName, sourceHost, processId]
-tags: [credential-dumping, lsass]
-dedup_window: "5m"
+  context_fields: [processName, processCommandLine, grantedAccess, userName, sourceHost, processId]
+tags: [credential-dumping, lsass, mimikatz]
+dedup_window: 5m
 `,
   },
 
-  // ── Rule 23: VPC Flow – Internal Port Scan ─────────────────────
+  // ── 4: PsExec / SMB Admin Share Lateral Movement ──────────────
   {
-    name: "Internal Port Scan Detected",
-    description: "Detects rapid connections from one internal host to many different ports on another host, indicating a port scan.",
-    severity: "medium",
-    logSource: "vpc_flow",
-    mitreIds: ["T1046"],
-    mitreTactic: "Discovery",
-    tags: ["discovery", "port-scan", "internal"],
-    yamlContent: `name: Internal Port Scan Detected
-description: Rapid blocked connections from internal host to many ports
-severity: medium
-type: threshold
-match:
-  category: "network"
-  action: "connection_blocked"
-  srcIp|cidr:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-threshold:
-  field: srcIp
-  count: 20
-  timeframe: "2m"
-mitre:
-  tactic: Discovery
-  technique_id: T1046
-  technique_name: "Network Service Discovery"
-alert:
-  title_template: "Internal port scan: {count} connections from {srcIp}"
-  context_fields: [srcIp, dstIp, dstPort, protocol, sourceHost]
-tags: [discovery, port-scan, internal]
-max_alerts_per_hour: 5
-dedup_window: "15m"
-`,
-  },
-
-  // ── Rule 24: Cleartext Credential in HTTP Request ───────────────
-  {
-    name: "Cleartext Credentials in HTTP Request",
-    description: "Detects HTTP requests containing common cleartext credential patterns in URLs or query strings.",
-    severity: "high",
-    logSource: "proxy",
-    mitreIds: ["T1552.004"],
-    mitreTactic: "Credential Access",
-    tags: ["credential-access", "http", "cleartext"],
-    yamlContent: `name: Cleartext Credentials in HTTP Request
-description: Credential-like strings detected in HTTP URL or User-Agent
-severity: high
-type: simple
-match:
-  category: "network"
-  httpMethod|contains|any:
-    - "GET"
-    - "POST"
-  httpUrl|contains|any:
-    - "password="
-    - "passwd="
-    - "pwd="
-    - "pass="
-    - "secret="
-    - "api_key="
-    - "token="
-mitre:
-  tactic: Credential Access
-  technique_id: T1552.004
-  technique_name: "Unsecured Credentials: Private Keys"
-alert:
-  title_template: "Cleartext credential in HTTP from {srcIp} to {dstIp}"
-  context_fields: [srcIp, dstIp, httpUrl, httpMethod, userName, sourceHost]
-tags: [credential-access, http, cleartext]
-max_alerts_per_hour: 20
-dedup_window: "5m"
-`,
-  },
-
-  // ── Rule 25: Suspicious WMI Lateral Movement ───────────────────
-  {
-    name: "WMI Lateral Movement",
-    description: "Detects usage of Windows Management Instrumentation (WMI) for remote execution, a common lateral movement technique.",
-    severity: "high",
-    logSource: "windows_eventlog",
-    mitreIds: ["T1047"],
+    name: "PsExec-style Lateral Movement",
+    description: "Detects service installation events whose binary path matches patterns associated with PsExec, PAExec, RemCom, or similar remote execution tools used for lateral movement over SMB.",
+    severity: "critical",
+    logSource: "windows",
+    mitreIds: ["T1021.002"],
     mitreTactic: "Lateral Movement",
-    tags: ["lateral-movement", "wmi"],
-    yamlContent: `name: WMI Lateral Movement
-description: WMI used for remote process execution
-severity: high
+    tags: ["lateral-movement", "psexec", "smb", "__seeded"],
+    yamlContent: `name: PsExec-style Lateral Movement
+description: Service installation matching PsExec, PAExec, or RemCom lateral movement tools
+severity: critical
 type: simple
 match:
-  category: "process"
-  action: "process_create"
-  parentProcessName|contains|any:
-    - "wmiprvse.exe"
-    - "WmiPrvSE.exe"
-  processName|contains|any:
-    - "cmd.exe"
-    - "powershell.exe"
-    - "cscript.exe"
-    - "wscript.exe"
-    - "mshta.exe"
+  category: service
+  action: service_install
+  servicePath|contains|any:
+    - PSEXESVC
+    - PSEXE
+    - PAExec
+    - RemCom
+    - csexec
+    - \\Admin$\\
 mitre:
   tactic: Lateral Movement
-  technique_id: T1047
-  technique_name: "Windows Management Instrumentation"
+  technique_id: T1021.002
+  technique_name: "Remote Services: SMB/Windows Admin Shares"
 alert:
-  title_template: "WMI remote execution: {processName} on {sourceHost}"
-  context_fields: [processName, parentProcessName, processCommandLine, userName, sourceHost]
-tags: [lateral-movement, wmi]
-dedup_window: "10m"
+  title_template: "PsExec lateral movement on {sourceHost} — service: {serviceName}"
+  context_fields: [serviceName, servicePath, userName, sourceHost, srcIp]
+tags: [lateral-movement, psexec, smb]
+dedup_window: 15m
+`,
+  },
+
+  // ── 5: Scheduled Task Persistence ─────────────────────────────
+  {
+    name: "Scheduled Task Created for Persistence",
+    description: "Detects schtasks.exe invocations that create or modify scheduled tasks. Attackers use scheduled tasks as a reliable persistence mechanism that survives reboots.",
+    severity: "high",
+    logSource: "windows",
+    mitreIds: ["T1053.005"],
+    mitreTactic: "Persistence",
+    tags: ["persistence", "scheduled-task", "__seeded"],
+    yamlContent: `name: Scheduled Task Created for Persistence
+description: Schtasks.exe used to create or modify a scheduled task
+severity: high
+type: simple
+match:
+  category: process
+  action: process_create
+  processName|contains: schtasks.exe
+  processCommandLine|contains:
+    - /create
+filter:
+  processCommandLine|contains|any:
+    - Microsoft\\Windows\\UpdateOrchestrator
+    - Microsoft\\Windows\\WindowsUpdate
+    - Microsoft\\Windows\\Defrag
+    - MicrosoftEdge
+mitre:
+  tactic: Persistence
+  technique_id: T1053.005
+  technique_name: "Scheduled Task/Job: Scheduled Task"
+alert:
+  title_template: "Scheduled task created on {sourceHost} by {userName}"
+  context_fields: [processCommandLine, userName, sourceHost, parentProcessName, processId]
+tags: [persistence, scheduled-task]
+dedup_window: 10m
+`,
+  },
+
+  // ── 6: Office Application Spawning a Shell ─────────────────────
+  {
+    name: "Office Application Spawning Shell",
+    description: "Detects a Microsoft Office process (Word, Excel, PowerPoint, Outlook) spawning a command interpreter or scripting host — the canonical indicator of a malicious macro payload from a phishing document.",
+    severity: "critical",
+    logSource: "windows",
+    mitreIds: ["T1566.001"],
+    mitreTactic: "Initial Access",
+    tags: ["phishing", "macro", "office", "initial-access", "__seeded"],
+    yamlContent: `name: Office Application Spawning Shell
+description: Office application (Word/Excel/PowerPoint/Outlook) spawning a command interpreter
+severity: critical
+type: simple
+match:
+  category: process
+  action: process_create
+  parentProcessName|contains|any:
+    - WINWORD.EXE
+    - EXCEL.EXE
+    - POWERPNT.EXE
+    - OUTLOOK.EXE
+    - MSPUB.EXE
+    - VISIO.EXE
+  processName|contains|any:
+    - cmd.exe
+    - powershell.exe
+    - pwsh.exe
+    - wscript.exe
+    - cscript.exe
+    - mshta.exe
+    - regsvr32.exe
+    - rundll32.exe
+    - certutil.exe
+    - bitsadmin.exe
+mitre:
+  tactic: Initial Access
+  technique_id: T1566.001
+  technique_name: "Phishing: Spearphishing Attachment"
+alert:
+  title_template: "Office macro shell: {parentProcessName} spawned {processName} on {sourceHost}"
+  context_fields: [parentProcessName, processName, processCommandLine, userName, sourceHost]
+tags: [phishing, macro, office, initial-access]
+dedup_window: 5m
+`,
+  },
+
+  // ── 7: Windows Registry Run Key Persistence ────────────────────
+  {
+    name: "Registry Run Key Persistence",
+    description: "Detects writes to HKCU or HKLM Run/RunOnce registry keys. These keys execute a program at every user logon or system boot and are a common persistence mechanism.",
+    severity: "high",
+    logSource: "windows",
+    mitreIds: ["T1547.001"],
+    mitreTactic: "Persistence",
+    tags: ["registry", "persistence", "__seeded"],
+    yamlContent: `name: Registry Run Key Persistence
+description: Write to a Run or RunOnce registry key used for logon/boot persistence
+severity: high
+type: simple
+match:
+  category: registry
+  action: registry_set
+  registryKey|contains|any:
+    - \\CurrentVersion\\Run\\
+    - \\CurrentVersion\\RunOnce\\
+    - \\CurrentVersion\\RunServices\\
+    - \\CurrentVersion\\RunServicesOnce\\
+filter:
+  processName|contains|any:
+    - msiexec.exe
+    - msiinstall.exe
+    - setup.exe
+    - install.exe
+mitre:
+  tactic: Persistence
+  technique_id: T1547.001
+  technique_name: "Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder"
+alert:
+  title_template: "Run key persistence on {sourceHost} by {userName}: {registryKey}"
+  context_fields: [registryKey, registryValue, processName, userName, sourceHost]
+tags: [registry, persistence]
+dedup_window: 10m
+`,
+  },
+
+  // ── 8: RDP Login from External IP ─────────────────────────────
+  {
+    name: "RDP Login from External IP",
+    description: "Detects a successful RDP (logon type 10 — RemoteInteractive) authentication from a source IP outside RFC-1918 private ranges. Externally-sourced RDP sessions are a significant indicator of unauthorized access.",
+    severity: "high",
+    logSource: "windows",
+    mitreIds: ["T1021.001"],
+    mitreTactic: "Lateral Movement",
+    tags: ["rdp", "external-access", "__seeded"],
+    yamlContent: `name: RDP Login from External IP
+description: Successful RDP (logon type 10) from a non-private source IP address
+severity: high
+type: simple
+match:
+  category: authentication
+  action: login_success
+  logonType: 10
+filter:
+  srcIp|cidr:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - ::1/128
+mitre:
+  tactic: Lateral Movement
+  technique_id: T1021.001
+  technique_name: "Remote Services: Remote Desktop Protocol"
+alert:
+  title_template: "External RDP login: {userName} from {srcIp} to {sourceHost}"
+  context_fields: [userName, srcIp, sourceHost, logonType, workstationName]
+tags: [rdp, external-access]
+dedup_window: 30m
+`,
+  },
+
+  // ── 9: Pass-the-Hash ───────────────────────────────────────────
+  {
+    name: "Pass-the-Hash Attack",
+    description: "Detects NTLM network logons (type 3) using NtLmSsp authentication from a non-domain-controller host — the hallmark pattern of a pass-the-hash lateral movement attack.",
+    severity: "critical",
+    logSource: "windows",
+    mitreIds: ["T1550.002"],
+    mitreTactic: "Lateral Movement",
+    tags: ["lateral-movement", "pass-the-hash", "ntlm", "__seeded"],
+    yamlContent: `name: Pass-the-Hash Attack
+description: NTLM network logon (type 3) via NtLmSsp from a non-domain-controller
+severity: critical
+type: simple
+match:
+  category: authentication
+  action: login_success
+  logonType: 3
+  authPackage: NtLmSsp
+  logonProcess: NtLmSsp
+filter:
+  srcIp|cidr:
+    - 127.0.0.0/8
+mitre:
+  tactic: Lateral Movement
+  technique_id: T1550.002
+  technique_name: "Use Alternate Authentication Material: Pass the Hash"
+alert:
+  title_template: "Pass-the-Hash: {userName} authenticated from {srcIp} to {sourceHost}"
+  context_fields: [userName, srcIp, sourceHost, logonType, authPackage, workstationName]
+tags: [lateral-movement, pass-the-hash, ntlm]
+dedup_window: 30m
+`,
+  },
+
+  // ── 10: Excessive DNS Queries / C2 Beaconing ──────────────────
+  {
+    name: "DNS Beaconing / C2 Query Spike",
+    description: "Detects a single host issuing an abnormally high volume of DNS queries within a short window. This pattern is consistent with C2 beaconing over DNS or DNS tunneling for data exfiltration.",
+    severity: "high",
+    logSource: "dns",
+    mitreIds: ["T1071.004"],
+    mitreTactic: "Command and Control",
+    tags: ["dns", "c2", "beaconing", "tunneling", "__seeded"],
+    yamlContent: `name: DNS Beaconing / C2 Query Spike
+description: Excessive DNS queries from a single host — consistent with C2 beaconing or DNS tunneling
+severity: high
+type: threshold
+match:
+  category: dns
+  action: dns_query
+threshold:
+  field: sourceHost
+  count: 100
+  timeframe: 5m
+filter:
+  dnsQuery|contains|any:
+    - microsoft.com
+    - windowsupdate.com
+    - office.com
+    - googleapis.com
+    - akamai.net
+mitre:
+  tactic: Command and Control
+  technique_id: T1071.004
+  technique_name: "Application Layer Protocol: DNS"
+alert:
+  title_template: "DNS spike: {count} queries from {sourceHost} in 5 minutes"
+  context_fields: [sourceHost, srcIp, dnsQuery, dnsType]
+tags: [dns, c2, beaconing, tunneling]
+max_alerts_per_hour: 5
+dedup_window: 15m
+`,
+  },
+
+  // ── 11: Large Outbound Data Transfer ──────────────────────────
+  {
+    name: "Large Outbound Data Transfer",
+    description: "Detects a single network session that transfers more than 100 MB of data to a non-private external IP address. Such transfers are anomalous in most enterprise environments and may indicate data exfiltration.",
+    severity: "high",
+    logSource: "network",
+    mitreIds: ["T1048"],
+    mitreTactic: "Exfiltration",
+    tags: ["exfiltration", "network", "data-transfer", "__seeded"],
+    yamlContent: `name: Large Outbound Data Transfer
+description: Single session outbound transfer of more than 100 MB to an external IP
+severity: high
+type: simple
+match:
+  category: network
+  direction: outbound
+  bytesOut|gt: 104857600
+filter:
+  dstIp|cidr:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+mitre:
+  tactic: Exfiltration
+  technique_id: T1048
+  technique_name: "Exfiltration Over Alternative Protocol"
+alert:
+  title_template: "Large outbound transfer: {bytesOut} bytes to {dstIp} from {sourceHost}"
+  context_fields: [srcIp, dstIp, dstPort, bytesOut, protocol, sourceHost, userName]
+tags: [exfiltration, network, data-transfer]
+max_alerts_per_hour: 5
+dedup_window: 1h
+`,
+  },
+
+  // ── 12: AWS Root Account API Activity ─────────────────────────
+  {
+    name: "AWS Root Account API Activity",
+    description: "Detects any AWS API call made using the root account. The root account should never be used for day-to-day operations; any activity is a high-confidence indicator of compromise or unauthorized privileged access.",
+    severity: "critical",
+    logSource: "cloudtrail",
+    mitreIds: ["T1078.004"],
+    mitreTactic: "Privilege Escalation",
+    tags: ["aws", "root-account", "cloudtrail", "cloud", "__seeded"],
+    yamlContent: `name: AWS Root Account API Activity
+description: Any AWS API call authenticated as the root account user
+severity: critical
+type: simple
+match:
+  sourceType: cloudtrail
+  userIdentityType: Root
+  errorCode|not|contains:
+    - AccessDenied
+    - NotAuthorized
+filter:
+  action|contains|any:
+    - CheckMfa
+    - GetSessionToken
+mitre:
+  tactic: Privilege Escalation
+  technique_id: T1078.004
+  technique_name: "Valid Accounts: Cloud Accounts"
+alert:
+  title_template: "AWS root account used: {action} from {srcIp}"
+  context_fields: [action, srcIp, userName, sourceHost, userIdentityType, httpUserAgent]
+tags: [aws, root-account, cloudtrail, cloud]
+dedup_window: 15m
 `,
   },
 ];
 
 /**
- * Seeds the rules table with default detection rules if empty.
- * Skips rules that already exist (matched by name).
+ * Clears ALL existing detection rules and reseeds from the SEED_RULES constant.
+ * This is intentionally destructive — it replaces the rule set on every call so
+ * that the code is always the source of truth for the default ruleset.
+ *
+ * User-created rules will be removed. If you need to preserve custom rules,
+ * export them before restarting the server or change this function to filter
+ * by the `__seeded` tag.
  */
 export async function seedDefaultRules(): Promise<number> {
-  const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(rulesTable);
-  if (Number(count) > 0) {
-    logger.info({ existingRules: Number(count) }, "Rules already exist, skipping seed");
-    return 0;
-  }
+  // Delete all existing rules to start from a clean slate
+  await db.delete(rulesTable);
+  logger.info("Cleared rules table — reseeding from code");
 
   let inserted = 0;
-  for (const rule of DEFAULT_RULES) {
+  for (const rule of SEED_RULES) {
     try {
       await db.insert(rulesTable).values({
         name: rule.name,
@@ -899,6 +517,6 @@ export async function seedDefaultRules(): Promise<number> {
     }
   }
 
-  logger.info({ inserted }, "Seeded default detection rules");
+  logger.info({ inserted }, "Seeded detection rules");
   return inserted;
 }
