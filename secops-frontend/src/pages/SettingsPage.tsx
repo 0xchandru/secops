@@ -1191,6 +1191,7 @@ function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
   const [tlApiKey, setTlApiKey] = useState('');
   const [tlTestStatus, setTlTestStatus] = useState<TestStatus>('idle');
   const [tlTestMsg, setTlTestMsg] = useState('');
+  const [showKey, setShowKey] = useState(false);
 
   useEffect(() => {
     if (!sysSettings) return;
@@ -1247,7 +1248,6 @@ function IntegrationsTab({ onSave }: { onSave: (msg: string) => void }) {
   };
 
   const apiKeyIsSet = tlApiKey === '••••••••';
-  const [showKey, setShowKey] = useState(false);
 
   return (
     <div>
